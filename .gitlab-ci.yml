@@ -1,0 +1,9 @@
+image: python:3.9.1-slim
+
+coverage:
+  script:
+  - pip install coverage
+  - coverage xml tableone_tests/test_tableone.py
+  artifacts:
+    reports:
+      cobertura: coverage.xml

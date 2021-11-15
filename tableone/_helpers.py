@@ -1,6 +1,6 @@
 from typing import Tuple
 import pandas as pd
-import scipy
+import scipy.stats
 import numpy as np
 
 
