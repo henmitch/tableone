@@ -2,8 +2,10 @@ image: python:3.9.1-slim
 
 coverage:
   script:
-  - pip install coverage
-  - coverage xml tableone_tests/test_tableone.py
+  - pip install coverage numpy pandas scipy
+  - coverage run --source=tableone -m unittest discover -s tableone_tests -p "test_*.py"
+  - coverage report
+  - coverage xml
   artifacts:
     reports:
       cobertura: coverage.xml

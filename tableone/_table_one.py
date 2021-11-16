@@ -178,3 +178,13 @@ class TableOne():
         if not as_str:
             return out
         return self.prettify(out)
+
+    def analyze_numeric(self, as_str: bool = False) -> pd.DataFrame:
+        out = pd.concat([
+            self.mean_and_sd(self.num),
+            self.mean_and_ci(self.num),
+            self.median_and_iqr(self.num)
+        ])
+        if not as_str:
+            return out
+        return self.prettify(out)

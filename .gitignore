@@ -1,11 +1,13 @@
 .#*
 .DS_Store
+.coverage
 .env
 .idea
 .ipynb_checkpoints
 .tokens
 .vscode
 __pycache__
+coverage.xml
 data/
 doc/_build/
 doc/api/auto
