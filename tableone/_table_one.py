@@ -1,4 +1,5 @@
 """For the Table One class"""
+import re
 import warnings
 from typing import Tuple, Union
 
@@ -9,7 +10,7 @@ from ._helpers import ci as ci_
 
 
 class TableOne():
-    _columns = ["category", "value", "paren"]
+    _category, _value, _paren = _columns = ["category", "value", "paren"]
 
     def __init__(self, data: pd.DataFrame, categorical: list, numerical: list):
         self.data = data.copy()
@@ -120,18 +121,19 @@ class TableOne():
             warnings.warn(f"{col} is not a categorical column.")
         # The counts, not normalized
         unnormed = self.data[col].value_counts(dropna=False)
-        unnormed.name = self._columns[1]
-        unnormed.index.name = self._columns[0]
+        unnormed.name = self._value
+        unnormed.index.name = self._category
 
         # The counts, normalized
         normed = unnormed / self.n
-        normed.name = self._columns[2]
-        normed.index.name = self._columns[0]
+        normed.name = self._paren
+        normed.index.name = self._category
 
         top_row = pd.DataFrame([[col, np.nan, np.nan]], columns=self._columns)
         out = unnormed.to_frame().join(normed.to_frame()).reset_index()
-        out[self._columns[0]] = out[self._columns[0]].astype(str)
-        out = out.sort_values([self._columns[1], self._columns[0]])
+        out[self._category] = out[self._category].astype(str)
+        out = out.sort_values([self._value, self._category],
+                              ascending=(False, True))
         return pd.concat([top_row, out]).reset_index(drop=True)
 
     def count_na(self) -> pd.Series:
@@ -153,38 +155,63 @@ class TableOne():
 
         return out
 
-    def prettify(self, df: pd.DataFrame) -> pd.DataFrame:
+    def drop_invalid(self) -> None:
+        """Drop the invalid values in the numeric columns"""
+        invalid = self.id_invalid()
+        for column in invalid:
+            self.data.loc[invalid[column], column] = np.nan
+
+    def prettify(self, df: pd.DataFrame, name: str = "") -> pd.DataFrame:
         out = df.set_index(df.columns[0])
 
         # To apply row by row
-        def print_proper(x: pd.Series) -> str:
-            if isinstance(x, str):
-                return x
-            # Confidence intervals
-            if isinstance(x, tuple):
-                return f"({x[0]:.02}, {x[1]:.02})"
-            # Means and medians
-            if x[self._columns[0]].str.match(r"Me(?:di)?an .* \(.+\)"):
-                return f"({x[self._columns[2]]:.02f})"
-            # Percentages
-            return f"({100*x[self._columns[2]]:.02f}%)"
+        def print_proper(row: pd.Series) -> str:
+            val = row.iloc[0]
+            paren = row.iloc[1]
+            if row.isna().all():
+                return ""
+            if isinstance(val, int):
+                val = f"{val:d}"
+            if isinstance(val, float):
+                val = f"{val:.2f}"
 
-        out["parens"] = out.apply(print_proper, axis=1)
-        out[""] = out[self._columns[1]] + " " + out["parens"]
+            if isinstance(paren, str):
+                return f"{val} ({paren})"
+            # Confidence intervals
+            if isinstance(paren, tuple):
+                return f"{val} ({paren[0]:.2f}, {paren[1]:.2f})"
+            # Means and medians
+            if re.match(r"Me(?:di)?an .* \(.+\)", row.name):
+                return f"{val} ({paren:.2f})"
+            # Percentages
+            return f"{val} ({100*paren:.2f}%)"
+
+        out[name] = out.apply(print_proper, axis=1)
+        out = out.reset_index()[[self._category, name]]
         return out
 
     def analyze_categorical(self, as_str: bool = False) -> pd.DataFrame:
-        out = self.counts(self.cat)
+        out = self.counts(self.cat).reset_index(drop=True)
         if not as_str:
             return out
         return self.prettify(out)
 
     def analyze_numeric(self, as_str: bool = False) -> pd.DataFrame:
+        if invalid := self.id_invalid():
+            raise ValueError("Invalid values found in numeric columns: "
+                             f"{invalid}")
         out = pd.concat([
             self.mean_and_sd(self.num),
             self.mean_and_ci(self.num),
             self.median_and_iqr(self.num)
-        ])
+        ]).reset_index(drop=True)
         if not as_str:
             return out
         return self.prettify(out)
+
+    def analyze(self, as_str: bool = False) -> pd.DataFrame:
+        out = pd.concat([
+            self.analyze_categorical(as_str=as_str),
+            self.analyze_numeric(as_str=as_str)
+        ]).reset_index(drop=True)
+        return out
