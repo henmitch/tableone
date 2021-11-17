@@ -3,7 +3,7 @@ image: python:3.9.1-slim
 coverage:
   script:
   - pip install coverage numpy pandas scipy
-  - coverage run --source=tableone -m unittest discover -s tableone_tests -p "test_*.py"
+  - coverage run --source=tableone -m unittest discover -s tests -p "test_*.py"
   - coverage report
   - coverage xml
   artifacts:
