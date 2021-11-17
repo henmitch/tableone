@@ -21,3 +21,8 @@ def ci(ser: pd.Series, confidence: float = 0.95) -> Tuple[float, float]:
     low = mean + t_score[0] * ser.std() / np.sqrt(n)
     high = mean + t_score[1] * ser.std() / np.sqrt(n)
     return (low, high)
+
+
+def iqr(ser: pd.Series) -> float:
+    """The interquartile range of a series"""
+    return ser.quantile(0.75) - ser.quantile(0.25)

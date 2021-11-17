@@ -1,18 +1,25 @@
 """For the Table One class"""
 import re
 import warnings
-from typing import Tuple, Union
+from typing import Callable, List, Tuple, Union
 
 import numpy as np
 import pandas as pd
 
+import tableone
+
 from ._helpers import ci as ci_
+from ._helpers import iqr
 
 
 class TableOne():
     _category, _value, _paren = _columns = ["category", "value", "paren"]
 
-    def __init__(self, data: pd.DataFrame, categorical: list, numerical: list):
+    def __init__(self,
+                 data: pd.DataFrame,
+                 categorical: list,
+                 numerical: list,
+                 groupings: list = None):
         self.data = data.copy()
 
         # Lowercase all column names
@@ -25,13 +32,18 @@ class TableOne():
         missing = (set(self.cat) | set(self.num)) - set(self.data.columns)
         if len(missing) > 0:
             raise ValueError(f"Missing columns: {missing}")
-        # Remove duplicates between cat and num
+        # Remove duplicates between cat and num while maintaining order
         # A nifty trick I pulled from StackOverflow (https://bit.ly/3DbcgoI)
         columns = list(dict.fromkeys(self.cat + self.num))
 
         self.data = self.data[columns]
         self.n = len(self.data)
-        # A default value
+
+        # This is coming next
+        # self.groupings = [] if groupings is None else groupings
+        # if missing := (set(self.groupings) - set(self.data.columns)):
+        #     raise ValueError("Groupings must be columns in data."
+        #                      f"Missing {missing}")
 
     def __repr__(self):
         return f"TableOne({self.n} patients)"
@@ -57,18 +69,17 @@ class TableOne():
         :returns: A dataframe with the mean and standard deviation of the
             column.
         """
-        if col is None:
-            return self.mean_and_sd(self.num)
-        if not isinstance(col, str):
-            return pd.concat([self.mean_and_sd(c) for c in col])
+        def mean(col: pd.Series) -> float:
+            """Return the mean of a column"""
+            return col.mean()
+        mean.__name__ = "Mean"
 
-        col = col.lower()
-        if not col in self.num:
-            warnings.warn(f"{col} is not a numeric column.")
-        mean = self.data[col].mean()
-        sd = self.data[col].std()
-        text = f"Mean {col} (SD)"
-        return self._to_dataframe(text, (mean, sd))
+        def sd(col: pd.Series) -> float:
+            """Return the standard deviation of a column"""
+            return col.std()
+        sd.__name__ = "SD"
+
+        return self._num_calc(col, mean, sd)
 
     def median_and_iqr(self, col: Union[str, list] = None) -> pd.DataFrame:
         """Return the median and interquartile range of columns
@@ -79,48 +90,75 @@ class TableOne():
         :returns: A dataframe with the median and interquartile range of the
             column.
         """
-        if col is None:
-            return self.median_and_iqr(self.num)
-        if not isinstance(col, str):
-            return pd.concat([self.median_and_iqr(c) for c in col])
 
-        col = col.lower()
-        if not col in self.num:
-            warnings.warn(f"{col} is not a numeric column.")
-        median = self.data[col].median()
-        iqr = self.data[col].quantile(0.75) - self.data[col].quantile(0.25)
-        text = f"Median {col} (IQR)"
-        return self._to_dataframe(text, (median, iqr))
+        def median(col: pd.Series) -> float:
+            """Return the median of a column"""
+            return col.median()
+        median.__name__ = "Median"
 
-    def mean_and_ci(self, col: Union[str, list] = None) -> pd.DataFrame:
+        def _iqr(col: pd.Series) -> float:
+            """Return the interquartile range of a column"""
+            return iqr(col)
+        _iqr.__name__ = "IQR"
+
+        return self._num_calc(col, median, _iqr)
+
+
+    def mean_and_ci(self, col_name: Union[str, list] = None) -> pd.DataFrame:
         """Mean and 95% confidence interval"""
-        if col is None:
-            return self.mean_and_ci(self.num)
-        if not isinstance(col, str):
-            return pd.concat([self.mean_and_ci(c) for c in col])
+        # Just for naming purposes
+        def _mean(col: pd.Series) -> float:
+            """Return the mean of a column"""
+            return col.mean()
+        _mean.__name__ = "Mean"
 
-        col = col.lower()
-        if not col in self.num:
-            warnings.warn(f"{col} is not a numeric column.")
-        mean = self.data[col].mean()
-        ci = ci_(self.data[col])
-        text = f"Mean {col} (95% CI)"
-        return self._to_dataframe(text, (mean, ci))
+        def _ci(col: pd.Series) -> Tuple[float, float]:
+            """Return the 95% confidence interval of a column"""
+            return ci_(col)
+        _ci.__name__ = "95% CI"
 
-    def counts(self, col: Union[str, list] = None) -> pd.DataFrame:
+        return self._num_calc(col_name, _mean, _ci)
+
+    def _num_calc(self,
+                  col_name: Union[str, List],
+                  val_func: Callable,
+                  spread_func: Callable,
+                  text: str = None) -> pd.DataFrame:
+        if col_name is None:
+            return self._num_calc(self.num, val_func, spread_func)
+        if not isinstance(col_name, str):
+            return pd.concat(
+                [self._num_calc(c, val_func, spread_func) for c in col_name])
+
+        col_name = col_name.lower()
+        col = self.data[col_name]
+
+        if not col_name in self.num:
+            warnings.warn(f"{col_name} is not a numeric column.")
+            col = pd.to_numeric(col, errors="coerce")
+
+        val = val_func(col)
+        spread = spread_func(col)
+        if text is None:
+            text = (f"{val_func.__name__} {col_name} ({spread_func.__name__})")
+        return self._to_dataframe(text, (val, spread))
+
+    def counts(self, col_name: Union[str, list] = None) -> pd.DataFrame:
         """Return the counts of a column"""
-        if col is None:
+        if col_name is None:
             return self.counts(self.cat)
 
-        if not isinstance(col, str):
+        if not isinstance(col_name, str):
             return pd.concat([self.counts(c)
-                              for c in col]).reset_index(drop=True)
+                              for c in col_name]).reset_index(drop=True)
 
-        col = col.lower()
-        if not col in self.cat:
-            warnings.warn(f"{col} is not a categorical column.")
+        col_name = col_name.lower()
+        if not col_name in self.cat:
+            warnings.warn(f"{col_name} is not a categorical column.")
+
+        col = self.data[col_name]
         # The counts, not normalized
-        unnormed = self.data[col].value_counts(dropna=False)
+        unnormed = col.value_counts(dropna=False)
         unnormed.name = self._value
         unnormed.index.name = self._category
 
@@ -129,7 +167,7 @@ class TableOne():
         normed.name = self._paren
         normed.index.name = self._category
 
-        top_row = pd.DataFrame([[col, np.nan, np.nan]], columns=self._columns)
+        top_row = pd.DataFrame([[col_name, np.nan, np.nan]], columns=self._columns)
         out = unnormed.to_frame().join(normed.to_frame()).reset_index()
         out[self._category] = out[self._category].astype(str)
         out = out.sort_values([self._value, self._category],
@@ -161,7 +199,8 @@ class TableOne():
         for column in invalid:
             self.data.loc[invalid[column], column] = np.nan
 
-    def prettify(self, df: pd.DataFrame, name: str = "") -> pd.DataFrame:
+    @staticmethod
+    def prettify(df: pd.DataFrame, name: str = "") -> pd.DataFrame:
         out = df.set_index(df.columns[0])
 
         # To apply row by row
@@ -170,8 +209,6 @@ class TableOne():
             paren = row.iloc[1]
             if row.isna().all():
                 return ""
-            if isinstance(val, int):
-                val = f"{val:d}"
             if isinstance(val, float):
                 val = f"{val:.2f}"
 
@@ -184,10 +221,10 @@ class TableOne():
             if re.match(r"Me(?:di)?an .* \(.+\)", row.name):
                 return f"{val} ({paren:.2f})"
             # Percentages
-            return f"{val} ({100*paren:.2f}%)"
+            return f"{float(val):.0f} ({paren:.2%})"
 
         out[name] = out.apply(print_proper, axis=1)
-        out = out.reset_index()[[self._category, name]]
+        out = out.reset_index()[[TableOne._category, name]]
         return out
 
     def analyze_categorical(self, as_str: bool = False) -> pd.DataFrame:
