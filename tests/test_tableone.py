@@ -72,7 +72,8 @@ class TestTableOne(unittest.TestCase):
             columns=["category", "value", "paren"])
         second_expect = pd.DataFrame(data=[["Mean col2 (SD)", 1.0, 0.0]],
                                      columns=["category", "value", "paren"])
-        third_expect = pd.concat([first_expect, second_expect])
+        third_expect = pd.concat([first_expect,
+                                  second_expect]).reset_index(drop=True)
 
         assert_frame_equal(table.mean_and_sd("Col1"), first_expect)
         assert_frame_equal(table.mean_and_sd("Col2"), second_expect)
@@ -80,6 +81,27 @@ class TestTableOne(unittest.TestCase):
         assert_frame_equal(table.mean_and_sd(["Col1", "Col2"]), third_expect)
         with self.assertWarns(UserWarning):
             table.mean_and_sd("Col3")
+
+    def test_mean_and_sd_str(self):
+        """Test the mean and standard devation"""
+        df = pd.read_csv(os.path.join(test_path, "test1.csv"))
+        table = tableone.TableOne(df, ["Col3"], ["Col1", "Col2"])
+        first_expect = pd.DataFrame(data=[[
+            "Mean col1 (SD)", f"5.50 ({np.std(df['Col1'], ddof=1):.2f})"
+        ]],
+                                    columns=["category", ""])
+        second_expect = pd.DataFrame(data=[["Mean col2 (SD)", "1.00 (0.00)"]],
+                                     columns=["category", ""])
+        third_expect = pd.concat([first_expect,
+                                  second_expect]).reset_index(drop=True)
+
+        assert_frame_equal(table.mean_and_sd("Col1", as_str=True),
+                           first_expect)
+        assert_frame_equal(table.mean_and_sd("Col2", as_str=True),
+                           second_expect)
+        assert_frame_equal(table.mean_and_sd(as_str=True), third_expect)
+        assert_frame_equal(table.mean_and_sd(["Col1", "Col2"], as_str=True),
+                           third_expect)
 
     def test_mean_and_ci(self):
         """Test the mean and standard devation"""
@@ -93,10 +115,40 @@ class TestTableOne(unittest.TestCase):
             data=[["Mean col2 (95% CI)", 1.0,
                    ci_(df["Col2"])]],
             columns=["category", "value", "paren"])
+        third_expect = pd.concat([first_expect,
+                                  second_expect]).reset_index(drop=True)
         assert_frame_equal(table.mean_and_ci("Col1"), first_expect)
         assert_frame_equal(table.mean_and_ci("Col2"), second_expect)
-        assert_frame_equal(table.mean_and_ci(),
-                           pd.concat([first_expect, second_expect]))
+        assert_frame_equal(table.mean_and_ci(), third_expect)
+        assert_frame_equal(table.mean_and_ci(["Col1", "Col2"]), third_expect)
+        with self.assertWarns(UserWarning):
+            table.mean_and_ci("Col3")
+
+    def test_mean_and_ci_str(self):
+        """Test the mean and standard devation"""
+        df = pd.read_csv(os.path.join(test_path, "test1.csv"))
+        table = tableone.TableOne(df, ["Col3"], ["Col1", "Col2"])
+        col1_ci = ci_(df["Col1"])
+        first_expect = pd.DataFrame(data=[[
+            "Mean col1 (95% CI)", f"5.50 ({col1_ci[0]:.2f}, {col1_ci[1]:.2f})"
+        ]],
+                                    columns=["category", ""])
+
+        col2_ci = ci_(df["Col2"])
+        second_expect = pd.DataFrame(data=[[
+            "Mean col2 (95% CI)", f"1.00 ({col2_ci[0]:.2f}, {col2_ci[1]:.2f})"
+        ]],
+                                     columns=["category", ""])
+        third_expect = pd.concat([first_expect,
+                                  second_expect]).reset_index(drop=True)
+
+        assert_frame_equal(table.mean_and_ci("Col1", as_str=True),
+                           first_expect)
+        assert_frame_equal(table.mean_and_ci("Col2", as_str=True),
+                           second_expect)
+        assert_frame_equal(table.mean_and_ci(as_str=True), third_expect)
+        assert_frame_equal(table.mean_and_ci(["Col1", "Col2"], as_str=True),
+                           third_expect)
         with self.assertWarns(UserWarning):
             table.mean_and_ci("Col3")
 
@@ -108,10 +160,13 @@ class TestTableOne(unittest.TestCase):
                                     columns=["category", "value", "paren"])
         second_expect = pd.DataFrame(data=[["Median col2 (IQR)", 1.0, 0.0]],
                                      columns=["category", "value", "paren"])
+        third_expect = pd.concat([first_expect,
+                                  second_expect]).reset_index(drop=True)
         assert_frame_equal(table.median_and_iqr("Col1"), first_expect)
         assert_frame_equal(table.median_and_iqr("Col2"), second_expect)
-        assert_frame_equal(table.median_and_iqr(),
-                           pd.concat([first_expect, second_expect]))
+        assert_frame_equal(table.median_and_iqr(["Col1", "Col2"]),
+                           third_expect)
+        assert_frame_equal(table.median_and_iqr(), third_expect)
         with self.assertWarns(UserWarning):
             table.median_and_iqr("Col3")
 

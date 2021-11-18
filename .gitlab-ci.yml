@@ -9,3 +9,9 @@ coverage:
   artifacts:
     reports:
       cobertura: coverage.xml
+
+test:
+  script:
+  - pip install coverage numpy pandas scipy
+  - python -m unittest discover -s tests -p "test_*.py"
+

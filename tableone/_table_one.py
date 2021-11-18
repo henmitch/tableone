@@ -6,8 +6,6 @@ from typing import Callable, List, Tuple, Union
 import numpy as np
 import pandas as pd
 
-import tableone
-
 from ._helpers import ci as ci_
 from ._helpers import iqr
 
@@ -60,7 +58,9 @@ class TableOne():
         return pd.DataFrame([[name, data[0], data[1]]],
                             columns=TableOne._columns)
 
-    def mean_and_sd(self, col: Union[str, list] = None) -> pd.DataFrame:
+    def mean_and_sd(self,
+                    col: Union[str, list] = None,
+                    as_str: bool = False) -> pd.DataFrame:
         """Return the mean and standard deviation of columns
 
         :param col: The column or columns to analyze.
@@ -72,16 +72,20 @@ class TableOne():
         def mean(col: pd.Series) -> float:
             """Return the mean of a column"""
             return col.mean()
+
         mean.__name__ = "Mean"
 
         def sd(col: pd.Series) -> float:
             """Return the standard deviation of a column"""
             return col.std()
+
         sd.__name__ = "SD"
 
-        return self._num_calc(col, mean, sd)
+        return self._num_calc(col, mean, sd, as_str=as_str)
 
-    def median_and_iqr(self, col: Union[str, list] = None) -> pd.DataFrame:
+    def median_and_iqr(self,
+                       col: Union[str, list] = None,
+                       as_str: bool = False) -> pd.DataFrame:
         """Return the median and interquartile range of columns
 
         :param col: The column or columns to analyze.
@@ -90,45 +94,60 @@ class TableOne():
         :returns: A dataframe with the median and interquartile range of the
             column.
         """
-
         def median(col: pd.Series) -> float:
             """Return the median of a column"""
             return col.median()
+
         median.__name__ = "Median"
 
         def _iqr(col: pd.Series) -> float:
             """Return the interquartile range of a column"""
             return iqr(col)
+
         _iqr.__name__ = "IQR"
 
-        return self._num_calc(col, median, _iqr)
+        return self._num_calc(col, median, _iqr, as_str=as_str)
 
-
-    def mean_and_ci(self, col_name: Union[str, list] = None) -> pd.DataFrame:
+    def mean_and_ci(self,
+                    col_name: Union[str, list] = None,
+                    as_str: bool = False) -> pd.DataFrame:
         """Mean and 95% confidence interval"""
+
         # Just for naming purposes
         def _mean(col: pd.Series) -> float:
             """Return the mean of a column"""
             return col.mean()
+
         _mean.__name__ = "Mean"
 
         def _ci(col: pd.Series) -> Tuple[float, float]:
             """Return the 95% confidence interval of a column"""
             return ci_(col)
+
         _ci.__name__ = "95% CI"
 
-        return self._num_calc(col_name, _mean, _ci)
+        return self._num_calc(col_name, _mean, _ci, as_str=as_str)
 
     def _num_calc(self,
                   col_name: Union[str, List],
                   val_func: Callable,
                   spread_func: Callable,
-                  text: str = None) -> pd.DataFrame:
+                  text: str = None,
+                  as_str: bool = False) -> pd.DataFrame:
         if col_name is None:
-            return self._num_calc(self.num, val_func, spread_func)
+            return self._num_calc(self.num,
+                                  val_func,
+                                  spread_func,
+                                  text=text,
+                                  as_str=as_str)
         if not isinstance(col_name, str):
-            return pd.concat(
-                [self._num_calc(c, val_func, spread_func) for c in col_name])
+            return pd.concat([
+                self._num_calc(c,
+                               val_func,
+                               spread_func,
+                               text=text,
+                               as_str=as_str) for c in col_name
+            ]).reset_index(drop=True)
 
         col_name = col_name.lower()
         col = self.data[col_name]
@@ -141,15 +160,22 @@ class TableOne():
         spread = spread_func(col)
         if text is None:
             text = (f"{val_func.__name__} {col_name} ({spread_func.__name__})")
-        return self._to_dataframe(text, (val, spread))
 
-    def counts(self, col_name: Union[str, list] = None) -> pd.DataFrame:
+        out = self._to_dataframe(text, (val, spread))
+
+        if as_str:
+            return self.prettify(out)
+        return out
+
+    def counts(self,
+               col_name: Union[str, list] = None,
+               as_str: bool = False) -> pd.DataFrame:
         """Return the counts of a column"""
         if col_name is None:
-            return self.counts(self.cat)
+            return self.counts(self.cat, as_str=as_str)
 
         if not isinstance(col_name, str):
-            return pd.concat([self.counts(c)
+            return pd.concat([self.counts(c, as_str=as_str)
                               for c in col_name]).reset_index(drop=True)
 
         col_name = col_name.lower()
@@ -167,12 +193,17 @@ class TableOne():
         normed.name = self._paren
         normed.index.name = self._category
 
-        top_row = pd.DataFrame([[col_name, np.nan, np.nan]], columns=self._columns)
+        top_row = pd.DataFrame([[col_name, np.nan, np.nan]],
+                               columns=self._columns)
         out = unnormed.to_frame().join(normed.to_frame()).reset_index()
         out[self._category] = out[self._category].astype(str)
         out = out.sort_values([self._value, self._category],
                               ascending=(False, True))
-        return pd.concat([top_row, out]).reset_index(drop=True)
+        out = pd.concat([top_row, out]).reset_index(drop=True)
+
+        if as_str:
+            return self.prettify(out)
+        return out
 
     def count_na(self) -> pd.Series:
         """Return the number of missing values per column"""
@@ -228,23 +259,19 @@ class TableOne():
         return out
 
     def analyze_categorical(self, as_str: bool = False) -> pd.DataFrame:
-        out = self.counts(self.cat).reset_index(drop=True)
-        if not as_str:
-            return out
-        return self.prettify(out)
+        out = self.counts(self.cat, as_str=as_str).reset_index(drop=True)
+        return out
 
     def analyze_numeric(self, as_str: bool = False) -> pd.DataFrame:
         if invalid := self.id_invalid():
             raise ValueError("Invalid values found in numeric columns: "
                              f"{invalid}")
         out = pd.concat([
-            self.mean_and_sd(self.num),
-            self.mean_and_ci(self.num),
-            self.median_and_iqr(self.num)
+            self.mean_and_sd(self.num, as_str=as_str),
+            self.mean_and_ci(self.num, as_str=as_str),
+            self.median_and_iqr(self.num, as_str=as_str)
         ]).reset_index(drop=True)
-        if not as_str:
-            return out
-        return self.prettify(out)
+        return out
 
     def analyze(self, as_str: bool = False) -> pd.DataFrame:
         out = pd.concat([
