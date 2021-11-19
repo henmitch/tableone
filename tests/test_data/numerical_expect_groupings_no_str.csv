@@ -1,0 +1,7 @@
+category,value,paren,value (col1 = 1),paren (col1 = 1),value (col1 = 2),paren (col1 = 2),value (col1 = 3),paren (col1 = 3),value (col1 = 4),paren (col1 = 4),value (col1 = 5),paren (col1 = 5),value (col1 = 6),paren (col1 = 6),value (col1 = 7),paren (col1 = 7),value (col1 = 8),paren (col1 = 8),value (col1 = 9),paren (col1 = 9),value (col1 = 10),paren (col1 = 10),value (col2 = 1),paren (col2 = 1)
+Mean col1 (SD),5.5,3.027650354,1,None,2,None,3,None,4,None,5,None,6,None,7,None,8,None,9,None,10,None,5.5,3.027650354
+Mean col2 (SD),1,0,1,None,1,None,1,None,1,None,1,None,1,None,1,None,1,None,1,None,1,None,1,0
+Mean col1 (95% CI),5.5,"(3.3341494103866087, 7.665850589613392)",1,"(None, None)",2,"(None, None)",3,"(None, None)",4,"(None, None)",5,"(None, None)",6,"(None, None)",7,"(None, None)",8,"(None, None)",9,"(None, None)",10,"(None, None)",5.5,"(3.3341494103866087, 7.665850589613392)"
+Mean col2 (95% CI),1,"(1.0, 1.0)",1,"(None, None)",1,"(None, None)",1,"(None, None)",1,"(None, None)",1,"(None, None)",1,"(None, None)",1,"(None, None)",1,"(None, None)",1,"(None, None)",1,"(None, None)",1,"(1.0, 1.0)"
+Median col1 (IQR),5.5,4.5,1,0,2,0,3,0,4,0,5,0,6,0,7,0,8,0,9,0,10,0,5.5,4.5
+Median col2 (IQR),1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0

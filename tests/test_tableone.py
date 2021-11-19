@@ -1,4 +1,6 @@
 """Unit-testing the tableone module"""
+import re
+import ast
 import os
 import unittest
 
@@ -7,8 +9,10 @@ import pandas as pd
 from pandas.testing import assert_frame_equal
 
 import tableone
+from tableone._helpers import (_category, _columns, _paren, _to_dataframe,
+                               _value)
 from tableone._helpers import ci as ci_
-from tableone._helpers import iqr
+from tableone._helpers import iqr, prettify
 
 test_path = os.path.join(os.path.dirname(__file__), "test_data")
 
@@ -52,15 +56,13 @@ class TestTableOne(unittest.TestCase):
 
     def test__to_dataframe(self):
         """Test the to-dataframe conversion"""
-        expect = pd.DataFrame(data=[["test", 1, 2]],
-                              columns=["category", "value", "paren"])
+        expect = pd.DataFrame(data=[["test", 1, 2]], columns=_columns)
         table = tableone.TableOne(pd.DataFrame(), [], [])
 
-        assert_frame_equal(table._to_dataframe("test", (1, 2)), expect)
-        assert_frame_equal(tableone.TableOne._to_dataframe("test", (1, 2)),
-                           expect)
+        assert_frame_equal(_to_dataframe("test", (1, 2)), expect)
+        assert_frame_equal(_to_dataframe("test", (1, 2)), expect)
         with self.assertWarns(UserWarning):
-            tableone.TableOne._to_dataframe("test", (1, 2, 3))
+            _to_dataframe("test", (1, 2, 3))
 
     def test_mean_and_sd(self):
         """Test the mean and standard devation"""
@@ -69,9 +71,9 @@ class TestTableOne(unittest.TestCase):
         first_expect = pd.DataFrame(
             data=[["Mean col1 (SD)", 5.5,
                    np.std(df["Col1"], ddof=1)]],
-            columns=["category", "value", "paren"])
+            columns=_columns)
         second_expect = pd.DataFrame(data=[["Mean col2 (SD)", 1.0, 0.0]],
-                                     columns=["category", "value", "paren"])
+                                     columns=_columns)
         third_expect = pd.concat([first_expect,
                                   second_expect]).reset_index(drop=True)
 
@@ -89,9 +91,9 @@ class TestTableOne(unittest.TestCase):
         first_expect = pd.DataFrame(data=[[
             "Mean col1 (SD)", f"5.50 ({np.std(df['Col1'], ddof=1):.2f})"
         ]],
-                                    columns=["category", ""])
+                                    columns=[_category, ""])
         second_expect = pd.DataFrame(data=[["Mean col2 (SD)", "1.00 (0.00)"]],
-                                     columns=["category", ""])
+                                     columns=[_category, ""])
         third_expect = pd.concat([first_expect,
                                   second_expect]).reset_index(drop=True)
 
@@ -110,11 +112,11 @@ class TestTableOne(unittest.TestCase):
         first_expect = pd.DataFrame(
             data=[["Mean col1 (95% CI)", 5.5,
                    ci_(df["Col1"])]],
-            columns=["category", "value", "paren"])
+            columns=_columns)
         second_expect = pd.DataFrame(
             data=[["Mean col2 (95% CI)", 1.0,
                    ci_(df["Col2"])]],
-            columns=["category", "value", "paren"])
+            columns=_columns)
         third_expect = pd.concat([first_expect,
                                   second_expect]).reset_index(drop=True)
         assert_frame_equal(table.mean_and_ci("Col1"), first_expect)
@@ -132,13 +134,13 @@ class TestTableOne(unittest.TestCase):
         first_expect = pd.DataFrame(data=[[
             "Mean col1 (95% CI)", f"5.50 ({col1_ci[0]:.2f}, {col1_ci[1]:.2f})"
         ]],
-                                    columns=["category", ""])
+                                    columns=[_category, ""])
 
         col2_ci = ci_(df["Col2"])
         second_expect = pd.DataFrame(data=[[
             "Mean col2 (95% CI)", f"1.00 ({col2_ci[0]:.2f}, {col2_ci[1]:.2f})"
         ]],
-                                     columns=["category", ""])
+                                     columns=[_category, ""])
         third_expect = pd.concat([first_expect,
                                   second_expect]).reset_index(drop=True)
 
@@ -157,9 +159,9 @@ class TestTableOne(unittest.TestCase):
         df = pd.read_csv(os.path.join(test_path, "test1.csv"))
         table = tableone.TableOne(df, ["Col3"], ["Col1", "Col2"])
         first_expect = pd.DataFrame(data=[["Median col1 (IQR)", 5.5, 4.5]],
-                                    columns=["category", "value", "paren"])
+                                    columns=_columns)
         second_expect = pd.DataFrame(data=[["Median col2 (IQR)", 1.0, 0.0]],
-                                     columns=["category", "value", "paren"])
+                                     columns=_columns)
         third_expect = pd.concat([first_expect,
                                   second_expect]).reset_index(drop=True)
         assert_frame_equal(table.median_and_iqr("Col1"), first_expect)
@@ -244,7 +246,7 @@ class TestTableOne(unittest.TestCase):
                 "1.07 (0.05)", "1 (4.53%)", ""
             ]
         })
-        assert_frame_equal(tableone.TableOne.prettify(data), expect)
+        assert_frame_equal(prettify(data), expect)
 
     def test_analyze_categorical_str(self):
         df = pd.read_csv(os.path.join(test_path, "test1.csv"))
@@ -265,9 +267,9 @@ class TestTableOne(unittest.TestCase):
         expect = expect.fillna("")
         expect = expect.join(expect[""].str.split(expand=True))
         expect = expect.rename(columns={0: "value", 1: "paren"})
-        expect = expect[tableone.TableOne._columns]
+        expect = expect[_columns]
         expect["value"] = expect["value"].astype(float)
-        expect["paren"] = expect["paren"].str.extract("(\d+)").astype(
+        expect["paren"] = expect["paren"].str.extract(r"(\d+)").astype(
             float) / 100
         table = tableone.TableOne(df, ["Col1", "Col2"], [])
         assert_frame_equal(table.analyze_categorical(), expect)
@@ -379,7 +381,7 @@ class TestTableOne(unittest.TestCase):
             0: "value",
             1: "paren"
         })
-        expect_categorical = expect_categorical[tableone.TableOne._columns]
+        expect_categorical = expect_categorical[_columns]
         expect_categorical["value"] = expect_categorical["value"].astype(float)
         expect_categorical["paren"] = expect_categorical["paren"].str.extract(
             "(\d+)").astype(float) / 100
@@ -387,6 +389,167 @@ class TestTableOne(unittest.TestCase):
                             expect_numeric]).reset_index(drop=True)
         table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"])
         assert_frame_equal(table.analyze(), expect)
+
+    def test_invalid_groupings(self):
+        df = pd.read_csv(os.path.join(test_path, "test1.csv"))
+        with self.assertRaises(ValueError):
+            tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                              groupings=["Col3"])
+
+    def test__split_groupings_one(self):
+        df = pd.read_csv(os.path.join(test_path, "test1.csv"))
+        table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                  "Col1")
+
+        def create_expect(i):
+            return pd.DataFrame({"col1": i, "col2": 1}, index=[0])
+
+        expect = {f"col1 = {i}": create_expect(i) for i in df['Col1'].unique()}
+        real = table._split_groupings()
+
+        for idx in expect:
+            with self.subTest(idx=idx):
+                assert_frame_equal(expect[idx], real[idx])
+
+    def test__split_groupings_two(self):
+        df = pd.read_csv(os.path.join(test_path, "test1.csv"))
+        table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                  ["Col1", "Col2"])
+
+        def create_expect(i):
+            return pd.DataFrame({"col1": i, "col2": 1}, index=[0])
+
+        expect = {f"col1 = {i}": create_expect(i) for i in df['Col1'].unique()}
+        expect |= {"col2 = 1": table.data}
+        real = table._split_groupings()
+
+        for idx in expect:
+            with self.subTest(idx=idx):
+                assert_frame_equal(expect[idx], real[idx])
+
+    def test_mean_and_sd_groupings_str(self):
+        df = pd.read_csv(os.path.join(test_path, "test1.csv"))
+        expect = pd.read_csv(
+            os.path.join(test_path, "numerical_expect_groupings_str.csv"))
+        expect = expect.rename(columns={"Unnamed: 1": ""})
+        expect = expect[expect[_category].str.match(r"Mean col\d \(SD\)")]
+
+        table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                  groupings=["Col1", "Col2"])
+        assert_frame_equal(table.mean_and_sd(as_str=True), expect)
+
+        expect_2 = expect.drop(columns="col2 = 1")
+        table_2 = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                    groupings=["Col1"])
+        assert_frame_equal(table_2.mean_and_sd(as_str=True), expect_2)
+
+    def test_mean_and_ci_groupings_str(self):
+        df = pd.read_csv(os.path.join(test_path, "test1.csv"))
+        expect = pd.read_csv(
+            os.path.join(test_path, "numerical_expect_groupings_str.csv"))
+        expect = expect.rename(columns={"Unnamed: 1": ""})
+        expect = expect[expect[_category].str.match(r"Mean col\d \(95% CI\)")]
+        expect = expect.reset_index(drop=True)
+
+        table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                  groupings=["Col1", "Col2"])
+        assert_frame_equal(table.mean_and_ci(as_str=True), expect)
+
+        expect_2 = expect.drop(columns="col2 = 1")
+        table_2 = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                    groupings=["Col1"])
+        assert_frame_equal(table_2.mean_and_ci(as_str=True), expect_2)
+
+    def test_median_and_iqr_groupings_str(self):
+        df = pd.read_csv(os.path.join(test_path, "test1.csv"))
+        expect = pd.read_csv(
+            os.path.join(test_path, "numerical_expect_groupings_str.csv"))
+        expect = expect.rename(columns={"Unnamed: 1": ""})
+        expect = expect[expect[_category].str.match(r"Median")]
+        expect = expect.reset_index(drop=True)
+
+        table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                  groupings=["Col1", "Col2"])
+        assert_frame_equal(table.median_and_iqr(as_str=True), expect)
+
+        expect_2 = expect.drop(columns="col2 = 1")
+        table_2 = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                    groupings=["Col1"])
+        assert_frame_equal(table_2.median_and_iqr(as_str=True), expect_2)
+
+    def test_mean_and_sd_groupings_no_str(self):
+        df = pd.read_csv(os.path.join(test_path, "test1.csv"))
+        expect = pd.read_csv(
+            os.path.join(test_path, "numerical_expect_groupings_no_str.csv"))
+        expect = expect.rename(columns={"Unnamed: 1": ""})
+        expect = expect[expect[_category].str.match(r"Mean col\d \(SD\)")]
+        expect = expect.reset_index(drop=True)
+        expect = expect.replace({"None": np.nan})
+        for col in expect.columns:
+            expect[col] = expect[col].astype(float, errors="ignore")
+
+        table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                  groupings=["Col1", "Col2"])
+        assert_frame_equal(table.mean_and_sd(), expect)
+
+        expect_2 = expect.drop(
+            columns=["value (col2 = 1)", "paren (col2 = 1)"])
+        table_2 = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                    groupings=["Col1"])
+        assert_frame_equal(table_2.mean_and_sd(), expect_2)
+
+    def test_mean_and_ci_groupings_no_str(self):
+        df = pd.read_csv(os.path.join(test_path, "test1.csv"))
+        expect = pd.read_csv(
+            os.path.join(test_path, "numerical_expect_groupings_no_str.csv"),
+            converters={
+                "paren": ast.literal_eval,
+                "paren (col2 = 1)": ast.literal_eval
+            }
+            | {f"paren (col1 = {i})": ast.literal_eval
+               for i in range(1, 11)})
+        expect = expect.rename(columns={"Unnamed: 1": ""})
+        expect = expect[expect[_category].str.match(r"Mean col\d \(95% CI\)")]
+        expect = expect.reset_index(drop=True)
+        for col in expect.columns:
+            expect[col] = expect[col].astype(float, errors="ignore")
+        # expect = expect.replace("(nan, nan)", (np.nan, np.nan))
+
+        table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                  groupings=["Col1", "Col2"])
+
+        to_explode = list(c for c in expect.columns if re.match("paren", c))
+        assert_frame_equal(table.mean_and_ci().explode(to_explode),
+                           expect.explode(to_explode))
+
+        expect_2 = expect.drop(
+            columns=["value (col2 = 1)", "paren (col2 = 1)"])
+        to_explode_2 = list(c for c in expect_2.columns
+                            if re.match("paren", c))
+        table_2 = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                    groupings=["Col1"])
+        assert_frame_equal(table_2.mean_and_ci().explode(to_explode_2),
+                           expect_2.explode(to_explode_2))
+
+    def test_median_and_iqr_groupings_no_str(self):
+        df = pd.read_csv(os.path.join(test_path, "test1.csv"))
+        expect = pd.read_csv(
+            os.path.join(test_path, "numerical_expect_groupings_no_str.csv"))
+        expect = expect.rename(columns={"Unnamed: 1": ""})
+        expect = expect[expect[_category].str.match(r"Median")]
+        expect = expect.reset_index(drop=True)
+        for col in expect.columns:
+            expect[col] = expect[col].astype(float, errors="ignore")
+
+        table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                  groupings=["Col1", "Col2"])
+        assert_frame_equal(table.median_and_iqr(), expect)
+
+        expect_2 = expect.drop(
+            columns=["value (col2 = 1)", "paren (col2 = 1)"])
+        table_2 = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                    groupings=["Col1"])
+        assert_frame_equal(table_2.median_and_iqr(), expect_2)
 
 
 if __name__ == '__main__':
