@@ -40,7 +40,7 @@ def prettify(df: pd.DataFrame, name: str = "") -> pd.DataFrame:
     def print_proper(row: pd.Series) -> str:
         val = row.iloc[0]
         paren = row.iloc[1]
-        if row.isna().all():
+        if row.eq("").all() or row.isna().all():
             return ""
         if isinstance(val, float):
             val = f"{val:.2f}"
@@ -95,3 +95,34 @@ def _to_dataframe(name: str, data: Tuple[float, float]) -> pd.DataFrame:
         warnings.warn(f"Too many data points provided for {name} and the "
                       "extras will be dropped.")
     return pd.DataFrame([[name, data[0], data[1]]], columns=_columns)
+
+
+def categorical_calculation(col: Union[pd.Series, List[pd.Series],
+                                       pd.DataFrame],
+                            as_str: bool = False,
+                            name: str = "") -> pd.DataFrame:
+    if isinstance(col, pd.DataFrame):
+        return pd.concat([
+            categorical_calculation(col[c], as_str=as_str, name=name)
+            for c in col.columns
+        ]).reset_index(drop=True)
+
+    n = col.size
+    unnormed = col.value_counts(dropna=False)
+    unnormed.name = _value
+    unnormed.index.name = _category
+
+    # The counts, normalized
+    normed = unnormed / n
+    normed.name = _paren
+    normed.index.name = _category
+
+    top_row = pd.DataFrame([[col.name.capitalize(), "", ""]], columns=_columns)
+    out = unnormed.to_frame().join(normed.to_frame()).reset_index()
+    out[_category] = out[_category].astype(str)
+    out = out.sort_values([_value, _category], ascending=(False, True))
+    out = pd.concat([top_row, out]).reset_index(drop=True)
+
+    if as_str:
+        return prettify(out, name=name)
+    return out

@@ -179,8 +179,8 @@ class TestTableOne(unittest.TestCase):
 
         counts_1_path = os.path.join(test_path, "counts1_expect.csv")
         counts_2_path = os.path.join(test_path, "counts2_expect.csv")
-        first_expect = pd.read_csv(counts_1_path)
-        second_expect = pd.read_csv(counts_2_path)
+        first_expect = pd.read_csv(counts_1_path).fillna("")
+        second_expect = pd.read_csv(counts_2_path).fillna("")
         third_expect = pd.concat([first_expect,
                                   second_expect]).reset_index(drop=True)
 
@@ -264,13 +264,13 @@ class TestTableOne(unittest.TestCase):
                                           "categorical_analysis_expect.csv"),
                              header=0,
                              names=["category", ""])
-        expect = expect.fillna("")
         expect = expect.join(expect[""].str.split(expand=True))
         expect = expect.rename(columns={0: "value", 1: "paren"})
         expect = expect[_columns]
         expect["value"] = expect["value"].astype(float)
         expect["paren"] = expect["paren"].str.extract(r"(\d+)").astype(
             float) / 100
+        expect = expect.fillna("")
         table = tableone.TableOne(df, ["Col1", "Col2"], [])
         assert_frame_equal(table.analyze_categorical(), expect)
 
@@ -387,6 +387,8 @@ class TestTableOne(unittest.TestCase):
             "(\d+)").astype(float) / 100
         expect = pd.concat([expect_categorical,
                             expect_numeric]).reset_index(drop=True)
+        expect = expect.fillna("")
+
         table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"])
         assert_frame_equal(table.analyze(), expect)
 
@@ -438,7 +440,7 @@ class TestTableOne(unittest.TestCase):
                                   groupings=["Col1", "Col2"])
         assert_frame_equal(table.mean_and_sd(as_str=True), expect)
 
-        expect_2 = expect.drop(columns="col2 = 1")
+        expect_2 = expect.drop(columns="col2 = 1 (n = 10)")
         table_2 = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
                                     groupings=["Col1"])
         assert_frame_equal(table_2.mean_and_sd(as_str=True), expect_2)
@@ -455,7 +457,7 @@ class TestTableOne(unittest.TestCase):
                                   groupings=["Col1", "Col2"])
         assert_frame_equal(table.mean_and_ci(as_str=True), expect)
 
-        expect_2 = expect.drop(columns="col2 = 1")
+        expect_2 = expect.drop(columns="col2 = 1 (n = 10)")
         table_2 = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
                                     groupings=["Col1"])
         assert_frame_equal(table_2.mean_and_ci(as_str=True), expect_2)
@@ -472,7 +474,7 @@ class TestTableOne(unittest.TestCase):
                                   groupings=["Col1", "Col2"])
         assert_frame_equal(table.median_and_iqr(as_str=True), expect)
 
-        expect_2 = expect.drop(columns="col2 = 1")
+        expect_2 = expect.drop(columns="col2 = 1 (n = 10)")
         table_2 = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
                                     groupings=["Col1"])
         assert_frame_equal(table_2.median_and_iqr(as_str=True), expect_2)
@@ -550,6 +552,25 @@ class TestTableOne(unittest.TestCase):
         table_2 = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
                                     groupings=["Col1"])
         assert_frame_equal(table_2.median_and_iqr(), expect_2)
+
+    def test_counts_groupings_str(self):
+        df = pd.read_csv(os.path.join(test_path, "test1.csv"))
+        expect = pd.read_csv(
+            os.path.join(test_path, "counts_expect_groupings_str.csv"))
+        expect = expect.rename(columns={"Unnamed: 1": ""}).fillna("")
+
+        table = tableone.TableOne(df, ["Col1", "Col2"], [], ["Col1", "Col2"])
+        assert_frame_equal(table.counts(as_str=True).fillna(""), expect)
+
+    def test_counts_groupings_no_str(self):
+        df = pd.read_csv(os.path.join(test_path, "test1.csv"))
+        expect = pd.read_csv(os.path.join(
+            test_path, "counts_expect_groupings_no_str.csv"),
+                             index_col=False)
+        expect = expect.rename(columns={"Unnamed: 1": ""}).fillna("")
+
+        table = tableone.TableOne(df, ["Col1", "Col2"], [], ["Col1", "Col2"])
+        assert_frame_equal(table.counts().fillna(""), expect)
 
 
 if __name__ == '__main__':

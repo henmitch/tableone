@@ -1,14 +1,14 @@
 """For the Table One class"""
-import functools
 import warnings
 from typing import Callable, Dict, Tuple, Union
 
 import numpy as np
 import pandas as pd
 
-from ._helpers import _category, _columns, _paren, _value
+from ._helpers import (_category, _columns, _paren, _value,
+                       categorical_calculation)
 from ._helpers import ci as ci_
-from ._helpers import iqr, numerical_calculation, prettify
+from ._helpers import iqr, numerical_calculation
 
 
 class TableOne:
@@ -42,7 +42,7 @@ class TableOne:
             map(lower, groupings))
         if missing_groupings := (set(self.groupings) - set(self.data.columns)):
             raise ValueError("Groupings must be columns in data."
-                             f"Missing {missing_groupings}")
+                             f" Missing {missing_groupings}")
 
     def __repr__(self):
         return f"TableOne({self.n} patients)"
@@ -121,7 +121,7 @@ class TableOne:
         return self._num_calc(col, _mean, _ci, as_str=as_str)
 
     def _num_calc(self,
-                  col: Union[str, list],
+                  col_name: Union[str, list],
                   val_func: Callable,
                   spread_func: Callable,
                   text: str = None,
@@ -135,22 +135,24 @@ class TableOne:
             "as_str": as_str
         }
         data = self.data.copy()
-        if isinstance(col, str):
-            col = col.lower()
-            if not col in self.num:
-                warnings.warn(f"{col} is not a numeric column.")
-                data[col] = pd.to_numeric(col, errors="coerce")
-        if isinstance(col, list):
-            col = list(map(str.lower, col))
-        if col is None:
-            col = self.num
+        if isinstance(col_name, str):
+            col_name = col_name.lower()
+            if not col_name in self.num:
+                warnings.warn(f"{col_name} is not a numeric column.")
+                data[col_name] = pd.to_numeric(col_name, errors="coerce")
+        if isinstance(col_name, list):
+            col_name = list(map(str.lower, col_name))
+        if col_name is None:
+            col_name = self.num
 
         if (not self.groupings) or (not split):
-            return numerical_calculation(data[col], **params, name=name)
+            return numerical_calculation(data[col_name], **params, name=name)
 
-        out = numerical_calculation(data[col], **params, name=name)
+        out = numerical_calculation(data[col_name], **params, name=name)
         for idx, group in self._split_groupings().items():
-            calc = numerical_calculation(group[col], **params, name=idx)
+            calc = numerical_calculation(group[col_name],
+                                         **params,
+                                         name=f"{idx} (n = {len(group)})")
             if not as_str:
                 calc.columns = [_category
                                 ] + [f"{c} ({idx})" for c in [_value, _paren]]
@@ -160,38 +162,40 @@ class TableOne:
 
     def counts(self,
                col_name: Union[str, list] = None,
-               as_str: bool = False) -> pd.DataFrame:
+               as_str: bool = False,
+               name: str = "",
+               split: bool = True) -> pd.DataFrame:
         """Return the counts of a column"""
+        fill = "0 (0.00%)" if as_str else 0
         if col_name is None:
             return self.counts(self.cat, as_str=as_str)
 
         if not isinstance(col_name, str):
-            return pd.concat([self.counts(c, as_str=as_str)
-                              for c in col_name]).reset_index(drop=True)
+            return pd.concat([
+                self.counts(c, as_str=as_str, name=name, split=split)
+                for c in col_name
+            ]).fillna(fill).reset_index(drop=True)
 
         col_name = col_name.lower()
         if not col_name in self.cat:
             warnings.warn(f"{col_name} is not a categorical column.")
 
-        col = self.data[col_name]
-        # The counts, not normalized
-        unnormed = col.value_counts(dropna=False)
-        unnormed.name = _value
-        unnormed.index.name = _category
+        if (not self.groupings) or (not split):
+            return categorical_calculation(self.data[col_name], as_str=as_str)
 
-        # The counts, normalized
-        normed = unnormed / self.n
-        normed.name = _paren
-        normed.index.name = _category
+        out = categorical_calculation(self.data[col_name],
+                                      as_str=as_str,
+                                      name=name)
+        for idx, group in self._split_groupings().items():
+            calc = categorical_calculation(group[col_name],
+                                           as_str=as_str,
+                                           name=f"{idx} (n = {len(group)})")
+            if not as_str:
+                calc.columns = [_category
+                                ] + [f"{c} ({idx})" for c in [_value, _paren]]
 
-        top_row = pd.DataFrame([[col_name, np.nan, np.nan]], columns=_columns)
-        out = unnormed.to_frame().join(normed.to_frame()).reset_index()
-        out[_category] = out[_category].astype(str)
-        out = out.sort_values([_value, _category], ascending=(False, True))
-        out = pd.concat([top_row, out]).reset_index(drop=True)
-
-        if as_str:
-            return prettify(out)
+            out = out.merge(calc, how="outer",
+                            suffixes=["", " " + idx]).fillna(fill)
         return out
 
     def count_na(self) -> pd.Series:
