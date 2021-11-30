@@ -583,6 +583,9 @@ class TestTableOne(unittest.TestCase):
                 expect.name = col
                 assert_series_equal(booleanize(df[col]), expect)
 
+        expect2 = pd.Series([False, True, False, True])
+        assert_series_equal(booleanize(expect2), expect2)
+
     def test_booleanize__fillna(self):
         df = pd.read_csv(os.path.join(test_path, "booleanize_expect.csv"))
         expect = pd.Series([False, True, False, True])
