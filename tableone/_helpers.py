@@ -5,7 +5,6 @@ from typing import Callable, List, Tuple, Union
 import numpy as np
 import pandas as pd
 import scipy.stats
-from pandas.api.types import is_numeric_dtype
 
 _category, _value, _paren = _columns = ["category", "value", "paren"]
 
@@ -111,16 +110,9 @@ def _to_dataframe(name: str, data: Tuple[float, float]) -> pd.DataFrame:
     return pd.DataFrame([[name, data[0], data[1]]], columns=_columns)
 
 
-def categorical_calculation(col: Union[pd.Series, List[pd.Series],
-                                       pd.DataFrame],
+def categorical_calculation(col: Union[pd.Series, List[pd.Series]],
                             as_str: bool = False,
                             name: str = "") -> pd.DataFrame:
-    if isinstance(col, pd.DataFrame):
-        return pd.concat([
-            categorical_calculation(col[c], as_str=as_str, name=name)
-            for c in col.columns
-        ]).reset_index(drop=True)
-
     n = col.size
     unnormed = col.value_counts(dropna=False)
     unnormed.name = _value
@@ -156,10 +148,12 @@ def booleanize(col: pd.Series, fillna: bool = None) -> pd.Series:
     except (ValueError, TypeError):
         pass
 
-    if is_numeric_dtype(col.dtype):
+    if np.issubdtype(col.dtype, np.number):
         out = (col > 0)
     elif col.dtype == object:
         out = col.str.upper().apply(lambda x: _bool_conversion.get(x, None))
+    else:
+        out = col
 
     out[col.isna()] = None
     if fillna is not None:

@@ -591,6 +591,25 @@ class TestTableOne(unittest.TestCase):
                 expect.name = col
                 assert_series_equal(booleanize(df[col], fillna=False), expect)
 
+    def test_boolean_str(self):
+        df = pd.read_csv(os.path.join(test_path, "boolean_input.csv"))
+        expect = pd.read_csv(os.path.join(test_path, "boolean_expect_str.csv"))
+        expect = expect.rename(columns={"Unnamed: 1": ""})
+        table = tableone.TableOne(df,
+                                  boolean=["col1", "col2"],
+                                  groupings=["col2"])
+        assert_frame_equal(table.analyze_boolean(as_str=True), expect)
+
+    def test_boolean_no_str(self):
+        df = pd.read_csv(os.path.join(test_path, "boolean_input.csv"))
+        expect = pd.read_csv(
+            os.path.join(test_path, "boolean_expect_no_str.csv"))
+        expect = expect.rename(columns={"Unnamed: 1": ""}).astype(object)
+        table = tableone.TableOne(df,
+                                  boolean=["col1", "col2"],
+                                  groupings=["col2"])
+        assert_frame_equal(table.analyze_boolean(), expect)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from ._helpers import (_category, _columns, _paren, _value,
-                       categorical_calculation)
+                       categorical_calculation, booleanize)
 from ._helpers import ci as ci_
 from ._helpers import iqr, numerical_calculation
 
@@ -40,6 +40,9 @@ class TableOne:
 
         self.data = self.data[columns]
         self.n = len(self.data)
+
+        for col in self.boolean:
+            self.data[col + "_bool"] = booleanize(self.data[col])
 
         if isinstance(groupings, str):
             groupings = [groupings]
@@ -182,8 +185,9 @@ class TableOne:
             ]).fillna(fill).reset_index(drop=True)
 
         col_name = col_name.lower()
-        if not col_name in self.cat:
-            warnings.warn(f"{col_name} is not a categorical column.")
+        if not col_name in self.cat + [col + "_bool" for col in self.boolean]:
+            warnings.warn(f"{col_name} is not a categorical or boolean "
+                          "column.")
 
         if (not self.groupings) or (not split):
             return categorical_calculation(self.data[col_name], as_str=as_str)
@@ -243,10 +247,20 @@ class TableOne:
         ]).reset_index(drop=True)
         return out
 
+    def analyze_boolean(self, as_str: bool = False) -> pd.DataFrame:
+        out = pd.DataFrame()
+        for col in self.boolean:
+            counts = self.counts(col + "_bool", as_str=as_str)
+            to_add = counts[counts[_category] == "    True"].copy()
+            to_add[_category] = col.capitalize()
+            out = pd.concat([out, to_add])
+        return out.reset_index(drop=True)
+
     def analyze(self, as_str: bool = False) -> pd.DataFrame:
         out = pd.concat([
             self.analyze_categorical(as_str=as_str),
-            self.analyze_numeric(as_str=as_str)
+            self.analyze_numeric(as_str=as_str),
+            self.analyze_boolean(as_str=as_str)
         ]).reset_index(drop=True)
         return out
 
