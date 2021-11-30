@@ -119,7 +119,7 @@ def categorical_calculation(col: Union[pd.Series, List[pd.Series],
 
     top_row = pd.DataFrame([[col.name.capitalize(), "", ""]], columns=_columns)
     out = unnormed.to_frame().join(normed.to_frame()).reset_index()
-    out[_category] = out[_category].astype(str)
+    out[_category] = "    " + out[_category].astype(str)
     out = out.sort_values([_value, _category], ascending=(False, True))
     out = pd.concat([top_row, out]).reset_index(drop=True)
 
