@@ -5,8 +5,22 @@ from typing import Callable, List, Tuple, Union
 import numpy as np
 import pandas as pd
 import scipy.stats
+from pandas.api.types import is_numeric_dtype
 
 _category, _value, _paren = _columns = ["category", "value", "paren"]
+
+_bool_conversion = {
+    "TRUE": True,
+    "FALSE": False,
+    "YES": True,
+    "NO": False,
+    "Y": True,
+    "N": False,
+    "1": True,
+    "0": False,
+    "T": True,
+    "F": False
+}
 
 
 def ci(ser: pd.Series, confidence: float = 0.95) -> Tuple[float, float]:
@@ -125,4 +139,30 @@ def categorical_calculation(col: Union[pd.Series, List[pd.Series],
 
     if as_str:
         return prettify(out, name=name)
+    return out
+
+
+def booleanize(col: pd.Series, fillna: bool = None) -> pd.Series:
+    """Convert a series to a boolean series
+
+    :col: The series to convert.
+    :type col: pd.Series
+
+    :return: A boolean series.
+    :rtype: pd.Series
+    """
+    try:
+        col = pd.to_numeric(col, errors="raise")
+    except (ValueError, TypeError):
+        pass
+
+    if is_numeric_dtype(col.dtype):
+        out = (col > 0)
+    elif col.dtype == object:
+        out = col.str.upper().apply(lambda x: _bool_conversion.get(x, None))
+
+    out[col.isna()] = None
+    if fillna is not None:
+        out = out.fillna(fillna)
+
     return out

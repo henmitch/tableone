@@ -14,10 +14,13 @@ from ._helpers import iqr, numerical_calculation
 class TableOne:
     def __init__(self,
                  data: pd.DataFrame,
-                 categorical: list,
-                 numerical: list,
+                 categorical: list = [],
+                 numerical: list = [],
+                 boolean: list = [],
                  groupings: Union[list, str] = None):
         self.data = data.copy()
+        if categorical + numerical + boolean == []:
+            raise ValueError("No columns specified.")
 
         # Lowercase all column names
         def lower(x):
@@ -26,12 +29,14 @@ class TableOne:
         self.data.columns = map(lower, self.data.columns)
         self.cat = list(map(lower, categorical))
         self.num = list(map(lower, numerical))
-        missing = (set(self.cat) | set(self.num)) - set(self.data.columns)
+        self.boolean = list(map(lower, boolean))
+        missing = ((set(self.cat) | set(self.num) | set(self.boolean)) -
+                   set(self.data.columns))
         if len(missing) > 0:
             raise ValueError(f"Missing columns: {missing}")
         # Remove duplicates between cat and num while maintaining order
         # A nifty trick I pulled from StackOverflow (https://bit.ly/3DbcgoI)
-        columns = list(dict.fromkeys(self.cat + self.num))
+        columns = list(dict.fromkeys(self.cat + self.num + self.boolean))
 
         self.data = self.data[columns]
         self.n = len(self.data)

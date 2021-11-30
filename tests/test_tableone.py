@@ -6,11 +6,11 @@ import unittest
 
 import numpy as np
 import pandas as pd
-from pandas.testing import assert_frame_equal
+from pandas.testing import assert_frame_equal, assert_series_equal
 
 import tableone
 from tableone._helpers import (_category, _columns, _paren, _to_dataframe,
-                               _value)
+                               _value, booleanize)
 from tableone._helpers import ci as ci_
 from tableone._helpers import iqr, prettify
 
@@ -28,6 +28,8 @@ class TestTableOne(unittest.TestCase):
         self.assertEqual(table.cat, ["col1"])
         self.assertEqual(table.num, ["col2"])
         self.assertEqual(0, table.n)
+        with self.assertRaises(ValueError):
+            tableone.TableOne(df)
 
     def test_str(self):
         """Test the string representation"""
@@ -57,7 +59,6 @@ class TestTableOne(unittest.TestCase):
     def test__to_dataframe(self):
         """Test the to-dataframe conversion"""
         expect = pd.DataFrame(data=[["test", 1, 2]], columns=_columns)
-        table = tableone.TableOne(pd.DataFrame(), [], [])
 
         assert_frame_equal(_to_dataframe("test", (1, 2)), expect)
         assert_frame_equal(_to_dataframe("test", (1, 2)), expect)
@@ -401,7 +402,7 @@ class TestTableOne(unittest.TestCase):
     def test__split_groupings_one(self):
         df = pd.read_csv(os.path.join(test_path, "test1.csv"))
         table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
-                                  "Col1")
+                                  groupings="Col1")
 
         def create_expect(i):
             return pd.DataFrame({"col1": i, "col2": 1}, index=[0])
@@ -416,7 +417,7 @@ class TestTableOne(unittest.TestCase):
     def test__split_groupings_two(self):
         df = pd.read_csv(os.path.join(test_path, "test1.csv"))
         table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
-                                  ["Col1", "Col2"])
+                                  groupings=["Col1", "Col2"])
 
         def create_expect(i):
             return pd.DataFrame({"col1": i, "col2": 1}, index=[0])
@@ -559,7 +560,8 @@ class TestTableOne(unittest.TestCase):
             os.path.join(test_path, "counts_expect_groupings_str.csv"))
         expect = expect.rename(columns={"Unnamed: 1": ""}).fillna("")
 
-        table = tableone.TableOne(df, ["Col1", "Col2"], [], ["Col1", "Col2"])
+        table = tableone.TableOne(df, ["Col1", "Col2"],
+                                  groupings=["Col1", "Col2"])
         assert_frame_equal(table.counts(as_str=True).fillna(""), expect)
 
     def test_counts_groupings_no_str(self):
@@ -569,8 +571,25 @@ class TestTableOne(unittest.TestCase):
                              index_col=False)
         expect = expect.rename(columns={"Unnamed: 1": ""}).fillna("")
 
-        table = tableone.TableOne(df, ["Col1", "Col2"], [], ["Col1", "Col2"])
+        table = tableone.TableOne(df, ["Col1", "Col2"],
+                                  groupings=["Col1", "Col2"])
         assert_frame_equal(table.counts().fillna(""), expect)
+
+    def test_booleanize_no_fillna(self):
+        df = pd.read_csv(os.path.join(test_path, "booleanize_expect.csv"))
+        expect = pd.Series([False, True, np.nan, True])
+        for col in df.columns:
+            with self.subTest(col=col):
+                expect.name = col
+                assert_series_equal(booleanize(df[col]), expect)
+
+    def test_booleanize__fillna(self):
+        df = pd.read_csv(os.path.join(test_path, "booleanize_expect.csv"))
+        expect = pd.Series([False, True, False, True])
+        for col in df.columns:
+            with self.subTest(col=col):
+                expect.name = col
+                assert_series_equal(booleanize(df[col], fillna=False), expect)
 
 
 if __name__ == '__main__':
