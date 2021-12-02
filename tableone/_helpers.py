@@ -126,3 +126,25 @@ def categorical_calculation(col: Union[pd.Series, List[pd.Series],
     if as_str:
         return prettify(out, name=name)
     return out
+
+
+def chi_square(column: pd.Series, condition: pd.Series) -> tuple:
+    trues = column[condition].value_counts().to_frame()
+    falses = column[~condition].value_counts().to_frame()
+    data = trues.join(falses, how="outer", lsuffix="_false").values
+    expect = (data.sum(axis=0) * data.sum(axis=1).reshape(-1, 1)) / data.sum()
+    chi = scipy.stats.chisquare(data, expect, axis=None)
+
+    return chi
+
+
+def ttest(column: pd.Series, condition: pd.Series) -> Tuple[float, float]:
+    trues = column[condition].values
+    falses = column[~condition].values
+    return scipy.stats.ttest_ind(trues, falses)
+
+
+def median_test(column: pd.Series, condition: pd.Series):
+    trues = column[condition].values
+    falses = column[~condition].values
+    return scipy.stats.median_test(trues, falses)
