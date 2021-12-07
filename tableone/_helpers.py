@@ -1,3 +1,4 @@
+"""Helper functions"""
 import re
 import warnings
 from typing import Callable, List, Tuple, Union
@@ -6,7 +7,7 @@ import numpy as np
 import pandas as pd
 import scipy.stats
 
-_category, _value, _paren = _columns = ["category", "value", "paren"]
+_category, _value, _paren, = _columns = ["category", "value", "paren"]
 
 
 def ci(ser: pd.Series, confidence: float = 0.95) -> Tuple[float, float]:
@@ -113,7 +114,6 @@ def numerical_calculation(col: Union[pd.Series, List[pd.Series], pd.DataFrame],
                           val_func: Callable,
                           spread_func: Callable,
                           text: str = None,
-                          as_str: bool = False,
                           name: str = "") -> pd.DataFrame:
     """Calculate a numerical statistic for a column
 
@@ -150,7 +150,6 @@ def numerical_calculation(col: Union[pd.Series, List[pd.Series], pd.DataFrame],
                                   val_func,
                                   spread_func,
                                   text,
-                                  as_str,
                                   name=name) for c in col.columns
         ]).reset_index(drop=True)
 
@@ -161,8 +160,6 @@ def numerical_calculation(col: Union[pd.Series, List[pd.Series], pd.DataFrame],
 
     out = _to_dataframe(text, (val, spread))
 
-    if as_str:
-        return prettify(out, name=name)
     return out
 
 
@@ -185,12 +182,11 @@ def _to_dataframe(name: str, data: Tuple[float, float]) -> pd.DataFrame:
     if len(data) > 2:
         warnings.warn(f"Too many data points provided for {name} and the "
                       "extras will be dropped.")
-    return pd.DataFrame([[name, data[0], data[1]]], columns=_columns)
+    return pd.DataFrame([[name, data[0], data[1]]], columns=_columns[:3])
 
 
 def categorical_calculation(col: Union[pd.Series, List[pd.Series],
                                        pd.DataFrame],
-                            as_str: bool = False,
                             name: str = "") -> pd.DataFrame:
     """Counts the number of times each category occurs in a column
 
@@ -200,10 +196,6 @@ def categorical_calculation(col: Union[pd.Series, List[pd.Series],
         category  value  paren
         a         2      0.50
         b         2      0.50
-        >>> categorical_calculation(col, as_str=True, name="Count")
-        category  Count
-        a         2 (50.00%)
-        b         2 (50.00%)
 
     :param col: The column or columns to count in. If a series, just use the
         series. If a list of series, concatenate the outputs. If a dataframe,
@@ -218,10 +210,12 @@ def categorical_calculation(col: Union[pd.Series, List[pd.Series],
     :rtype: pd.DataFrame
     """
     if isinstance(col, pd.DataFrame):
-        return pd.concat([
-            categorical_calculation(col[c], as_str=as_str, name=name)
-            for c in col.columns
-        ]).reset_index(drop=True)
+        return pd.concat(
+            [categorical_calculation(col[c], name) for c in col.columns],
+            axis=0).reset_index(drop=True)
+    if isinstance(col, list):
+        return pd.concat([categorical_calculation(c, name) for c in col],
+                         axis=0).reset_index(drop=True)
 
     n = col.size
     unnormed = col.value_counts(dropna=False)
@@ -239,8 +233,6 @@ def categorical_calculation(col: Union[pd.Series, List[pd.Series],
     out = out.sort_values([_value, _category], ascending=(False, True))
     out = pd.concat([top_row, out]).reset_index(drop=True)
 
-    if as_str:
-        return prettify(out, name=name)
     return out
 
 

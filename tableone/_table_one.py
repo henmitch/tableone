@@ -5,13 +5,23 @@ from typing import Callable, Dict, Tuple, Union
 import numpy as np
 import pandas as pd
 
-from ._helpers import (_category, _columns, _paren, _value,
-                       categorical_calculation)
+from ._helpers import _category, _paren, _value, categorical_calculation
 from ._helpers import ci as ci_
-from ._helpers import iqr, numerical_calculation
+from ._helpers import iqr, numerical_calculation, prettify
 
 
 class TableOne:
+    """A class to hold and analyze data for a Table One
+
+    :param data: The data to analyze.
+    :type data: pandas.DataFrame
+    :param categorical: The categorical columns to analyze.
+    :type categorical: list
+    :param numerical: The numerical columns to analyze.
+    :type numerical: list
+    :param groupings: The columns to group by.
+    :type groupings: list
+    """
     def __init__(self,
                  data: pd.DataFrame,
                  categorical: list,
@@ -128,35 +138,73 @@ class TableOne:
                   as_str: bool = False,
                   name: str = "",
                   split: bool = True) -> pd.DataFrame:
+        """A generic function to calculate center and spread
+
+        :param col_name: The column or columns to analyze.
+        :type col_name: str or list
+        :param val_func: The function to calculate the value.
+        :type val_func: Callable
+        :param spread_func: The function to calculate the spread.
+        :type spread_func: Callable
+        :param text: The text to use for the resultant row.
+        :type text: str
+        :param as_str: Whether to return the result as a dataframe of strings.
+        :type as_str: bool
+        :param name: The name of the resultant column.
+        :type name: str
+        :param split: Whether to split the column based on groupings.
+        :type split: bool
+
+        :return: A dataframe with the center and spread of the data
+        :rtype: pd.DataFrame
+        """
         params = {
             "val_func": val_func,
             "spread_func": spread_func,
-            "text": text,
-            "as_str": as_str
+            "text": text
         }
         data = self.data.copy()
+
+        # The groupings to split into
+        split_groupings = self._split_groupings()
+        names = [f"All patients (n = {self.n})"] + [
+            f"{idx} (n = {len(group)})"
+            for idx, group in split_groupings.items()
+        ]
+
+        # If we're only analyzing one column, we need it lowercase
         if isinstance(col_name, str):
             col_name = col_name.lower()
             if not col_name in self.num:
                 warnings.warn(f"{col_name} is not a numeric column.")
                 data[col_name] = pd.to_numeric(col_name, errors="coerce")
+
+        # We can look at all columns together, since they'll be uniquely
+        # indexed
         if isinstance(col_name, list):
             col_name = list(map(str.lower, col_name))
+        # If unspecified, just do all of them.
         if col_name is None:
             col_name = self.num
 
+        # TODO: Refactor this
         if (not self.groupings) or (not split):
-            return numerical_calculation(data[col_name], **params, name=name)
+            out = numerical_calculation(data[col_name], **params, name=name)
+            if as_str:
+                out = prettify(out, name=names[0])
+            return out
 
         out = numerical_calculation(data[col_name], **params, name=name)
-        for idx, group in self._split_groupings().items():
+        for idx, group in split_groupings.items():
             calc = numerical_calculation(group[col_name],
                                          **params,
                                          name=f"{idx} (n = {len(group)})")
-            if not as_str:
-                calc.columns = [_category
-                                ] + [f"{c} ({idx})" for c in [_value, _paren]]
+            calc.columns = [_category
+                            ] + [f"{c} ({idx})" for c in [_value, _paren]]
             out = out.merge(calc, how="outer", suffixes=["", " " + idx])
+
+        if as_str:
+            out = prettify(out, name=names)
 
         return out
 
@@ -166,36 +214,51 @@ class TableOne:
                name: str = "",
                split: bool = True) -> pd.DataFrame:
         """Return the counts of a column"""
-        fill = "0 (0.00%)" if as_str else 0
+        data = self.data.copy()
         if col_name is None:
             return self.counts(self.cat, as_str=as_str)
 
+        split_groupings = self._split_groupings()
+        names = [f"All patients (n = {self.n})"] + [
+            f"{idx} (n = {len(group)})"
+            for idx, group in split_groupings.items()
+        ]
         if not isinstance(col_name, str):
-            return pd.concat([
-                self.counts(c, as_str=as_str, name=name, split=split)
+            out = pd.concat([
+                self.counts(c, as_str=False, name=name, split=split)
                 for c in col_name
-            ]).fillna(fill).reset_index(drop=True)
+            ]).fillna(0).reset_index(drop=True)
+            if as_str:
+                out = prettify(out, name=names)
+            return out
 
         col_name = col_name.lower()
         if not col_name in self.cat:
             warnings.warn(f"{col_name} is not a categorical column.")
 
         if (not self.groupings) or (not split):
-            return categorical_calculation(self.data[col_name], as_str=as_str)
+            out = categorical_calculation(data[col_name], name=name)
+            if as_str:
+                out = prettify(out, name=names[0])
+            return out
 
-        out = categorical_calculation(self.data[col_name],
-                                      as_str=as_str,
-                                      name=name)
-        for idx, group in self._split_groupings().items():
+        out = categorical_calculation(data[col_name], name=name)
+        for idx, group in split_groupings.items():
             calc = categorical_calculation(group[col_name],
-                                           as_str=as_str,
                                            name=f"{idx} (n = {len(group)})")
-            if not as_str:
-                calc.columns = [_category
-                                ] + [f"{c} ({idx})" for c in [_value, _paren]]
+            calc.columns = [_category
+                            ] + [f"{c} ({idx})" for c in [_value, _paren]]
 
-            out = out.merge(calc, how="outer",
-                            suffixes=["", " " + idx]).fillna(fill)
+            out = out.merge(calc,
+                            on=_category,
+                            how="outer",
+                            suffixes=["", " " + idx])
+
+        out = out.fillna(0)
+
+        if as_str:
+            out = prettify(out, name=names)
+
         return out
 
     def count_na(self) -> pd.Series:
