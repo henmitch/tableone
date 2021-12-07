@@ -34,6 +34,36 @@ def iqr(ser: pd.Series) -> float:
 
 
 def prettify(df: pd.DataFrame, name: str = "") -> pd.DataFrame:
+    """Prettify a dataframe
+
+    For example::
+        >>> df = pd.DataFrame([["Mean data (SD)", 1.256, 0.254],
+        ...                    ["Median data (IQR)", 2.564, 2.543]]])
+        >>> prettify(df, name="Statistic)
+        category            Statistic
+        Mean data (SD)      1.26 (0.25)
+        Median data (IQR)   2.56 (2.54)
+        >>> df = pd.DataFrame([["Count 1", 10, 0.0314159],
+        ...                    ["Count 2", 20, 0.0271828]])
+        >>> prettify(df, name="Count")
+        category  Count
+        Count 1    10 (3.14%)
+        Count 2    20 (2.72%)
+        >>> df = pd.DataFrame([["Mean data1 (95% CI)", 1.256, (0.523, 1.523)],
+        ...                    ["Mean data2 (95% CI)", 2.564, (1.523, 2.523)]])
+        >>> prettify(df, name="Statistic")
+        category             Statistic
+        Mean data1 (95% CI)  1.26 (0.52, 1.52)
+        Mean data2 (95% CI)  2.56 (1.52, 2.52)
+
+    :param df: The dataframe to prettify
+    :type df: pd.DataFrame
+    :param name: The name of the output column
+    :type name: str
+
+    :return: The prettified dataframe
+    :rtype: pd.DataFrame
+    """
     out = df.set_index(df.columns[0])
 
     # To apply row by row
@@ -65,8 +95,37 @@ def numerical_calculation(col: Union[pd.Series, List[pd.Series], pd.DataFrame],
                           val_func: Callable,
                           spread_func: Callable,
                           text: str = None,
-                          as_str: bool = None,
+                          as_str: bool = False,
                           name: str = "") -> pd.DataFrame:
+    """Calculate a numerical statistic for a column
+
+    For example::
+        >>> col = pd.Series([1, 2, 3, 4, 5], name="A")
+        >>> numerical_calculation(col, np.mean, np.std)
+        category      value  paren
+        Mean A (std)  2.50   0.50
+        >>> numerical_calculation(col, np.mean, np.std, as_str=True)
+        category      Mean
+        Mean A (std)  2.50 (0.50)
+
+    :param col: The column to calculate the statistic for
+    :type col: pd.Series or list of pd.Series
+    :param val_func: The function to calculate the value
+    :type val_func: Callable
+    :param spread_func: The function to calculate the spread
+    :type spread_func: Callable
+    :param text: The name of the resulting row. Defaults to
+        ``{val_func.__name__} {col.name} ({spread_func.__name__})``
+    :type text: str
+    :param as_str: Whether to return the output as a dataframe of strings.
+        Defaults to ``False``.
+    :type as_str: bool
+    :param name: The name of the resulting column. Defaults to ``""``.
+    :type name: str
+
+    :return: The calculated statistic dataframe
+    :rtype: pd.DataFrame
+    """
     if isinstance(col, pd.DataFrame):
         return pd.concat([
             numerical_calculation(col[c],
@@ -90,7 +149,21 @@ def numerical_calculation(col: Union[pd.Series, List[pd.Series], pd.DataFrame],
 
 
 def _to_dataframe(name: str, data: Tuple[float, float]) -> pd.DataFrame:
-    """Return a dataframe with the name and data"""
+    """Return a dataframe with the name and data
+
+    For example::
+        >>> _to_dataframe("Mean", (1.0, 0.1))
+        category  value  paren
+        Mean      1.00   0.10
+
+    :param name: The name of the row
+    :type name: str
+    :param data: The data to put in the row
+    :type data: Tuple[float, float]
+
+    :return: A dataframe with the name and data
+    :rtype: pd.DataFrame
+    """
     if len(data) > 2:
         warnings.warn(f"Too many data points provided for {name} and the "
                       "extras will be dropped.")
@@ -101,6 +174,31 @@ def categorical_calculation(col: Union[pd.Series, List[pd.Series],
                                        pd.DataFrame],
                             as_str: bool = False,
                             name: str = "") -> pd.DataFrame:
+    """Counts the number of times each category occurs in a column
+
+    For example::
+        >>> col = pd.Series(["a", "b", "a", "b", "a", "b"])
+        >>> categorical_calculation(col)
+        category  value  paren
+        a         2      0.50
+        b         2      0.50
+        >>> categorical_calculation(col, as_str=True, name="Count")
+        category  Count
+        a         2 (50.00%)
+        b         2 (50.00%)
+
+    :param col: The column or columns to count in. If a series, just use the
+        series. If a list of series, concatenate the outputs. If a dataframe,
+        concatenate the outputs of each column
+    :type col: pd.Series or List[pd.Series] or pd.DataFrame
+    :param as_str: Whether to return the data as a dataframe of strings or a
+        dataframe of floats.
+    :type as_str: bool
+    :param name: The name of the output columns.
+
+    :return: A dataframe of the counts.
+    :rtype: pd.DataFrame
+    """
     if isinstance(col, pd.DataFrame):
         return pd.concat([
             categorical_calculation(col[c], as_str=as_str, name=name)
@@ -128,10 +226,7 @@ def categorical_calculation(col: Union[pd.Series, List[pd.Series],
     return out
 
 
-def chi_square(column: pd.Series, condition: pd.Series) -> tuple:
-    trues = column[condition].value_counts().to_frame()
-    falses = column[~condition].value_counts().to_frame()
-    data = trues.join(falses, how="outer", lsuffix="_false").values
+def chi_square(data: np.ndarray) -> tuple:
     expect = (data.sum(axis=0) * data.sum(axis=1).reshape(-1, 1)) / data.sum()
     chi = scipy.stats.chisquare(data, expect, axis=None)
 
