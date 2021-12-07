@@ -33,7 +33,8 @@ def iqr(ser: pd.Series) -> float:
     return ser.quantile(0.75) - ser.quantile(0.25)
 
 
-def prettify(df: pd.DataFrame, name: str = "") -> pd.DataFrame:
+def prettify(df: pd.DataFrame,
+             name: Union[str, List[str]] = "") -> pd.DataFrame:
     """Prettify a dataframe
 
     For example::
@@ -55,39 +56,56 @@ def prettify(df: pd.DataFrame, name: str = "") -> pd.DataFrame:
         category             Statistic
         Mean data1 (95% CI)  1.26 (0.52, 1.52)
         Mean data2 (95% CI)  2.56 (1.52, 2.52)
+        >>> df = pd.DataFrame([["Count 1", 10, 0.0314159, 20, 0.0271828],
+        ...                    ["Count 2", 20, 0.0271828, 30, 0.0245283]])
+        >>> prettify(df, name=["Count1", "Count2"])
+        category   Count1      Count2
+        Count 1    10 (3.14%)  20 (2.72%)
+        Count 2    20 (2.72%)  30 (2.45%)
 
     :param df: The dataframe to prettify
     :type df: pd.DataFrame
-    :param name: The name of the output column
-    :type name: str
+    :param name: The name or names of the output column or columns
+    :type name: str or list of str
 
     :return: The prettified dataframe
     :rtype: pd.DataFrame
     """
     out = df.set_index(df.columns[0])
+    if not isinstance(name, str) and len(name) != len(out.columns) / 2:
+        raise ValueError("name must be half in length as the number of "
+                         f"columns. Instead, got {len(name)} names "
+                         f"and {len(out.columns)} columns.")
+    if isinstance(name, str):
+        name = [name]
 
     # To apply row by row
-    def print_proper(row: pd.Series) -> str:
-        val = row.iloc[0]
-        paren = row.iloc[1]
-        if row.eq("").all() or row.isna().all():
-            return ""
-        if isinstance(val, float):
-            val = f"{val:.2f}"
+    def print_proper(row: pd.Series) -> pd.DataFrame:
+        printed = pd.Series(dtype="object", index=name)
+        for i, n in enumerate(name):
+            val = row.iloc[2 * i + 0]
+            paren = row.iloc[2 * i + 1]
+            if row.eq("").all() or row.isna().all():
+                printed[n] = ""
+                continue
+            if isinstance(val, float):
+                val = f"{val:.2f}"
 
-        if isinstance(paren, str):
-            return f"{val} ({paren})"
-        # Confidence intervals
-        if isinstance(paren, tuple):
-            return f"{val} ({paren[0]:.2f}, {paren[1]:.2f})"
-        # Means and medians
-        if re.match(r"Me(?:di)?an .* \(.+\)", row.name):
-            return f"{val} ({paren:.2f})"
-        # Percentages
-        return f"{float(val):.0f} ({paren:.2%})"
+            if isinstance(paren, str):
+                printed[n] = f"{val} ({paren})"
+            elif isinstance(paren, tuple):
+                # Confidence intervals
+                printed[n] = f"{val} ({paren[0]:.2f}, {paren[1]:.2f})"
+            elif re.match(r"Me(?:di)?an .* \(.+\)", row.name):
+                # Means and medians
+                printed[n] = f"{val} ({paren:.2f})"
+            else:
+                # Percentages
+                printed[n] = f"{float(val):.0f} ({paren:.2%})"
+        return printed
 
     out[name] = out.apply(print_proper, axis=1)
-    out = out.reset_index()[[_category, name]]
+    out = out.reset_index()[[_category] + name]
     return out
 
 

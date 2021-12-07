@@ -248,6 +248,17 @@ class TestTableOne(unittest.TestCase):
         })
         assert_frame_equal(prettify(data), expect)
 
+        data = data.merge(
+            data.rename(columns={
+                "Value": "Value2",
+                "Paren": "Paren2"
+            }))
+        expect = expect.merge(expect.rename(columns={"": "expect2"}))
+        assert_frame_equal(prettify(data, name=["", "expect2"]), expect)
+
+        with self.assertRaises(ValueError):
+            prettify(data, name=["", "expect2", "expect3"])
+
     def test_analyze_categorical_str(self):
         df = pd.read_csv(os.path.join(test_path, "test1.csv"))
         expect = pd.read_csv(os.path.join(test_path,
