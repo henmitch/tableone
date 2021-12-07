@@ -5,8 +5,8 @@ from typing import Callable, Dict, Tuple, Union
 import numpy as np
 import pandas as pd
 
-from ._helpers import (_category, _columns, _paren, _value,
-                       categorical_calculation, booleanize)
+from ._helpers import (_category, _columns, _paren, _value, booleanize,
+                       categorical_calculation)
 from ._helpers import ci as ci_
 from ._helpers import iqr, numerical_calculation
 
@@ -14,22 +14,26 @@ from ._helpers import iqr, numerical_calculation
 class TableOne:
     def __init__(self,
                  data: pd.DataFrame,
-                 categorical: list = [],
-                 numerical: list = [],
-                 boolean: list = [],
+                 categorical: list = None,
+                 numerical: list = None,
+                 boolean: list = None,
                  groupings: Union[list, str] = None):
         self.data = data.copy()
-        if categorical + numerical + boolean == []:
-            raise ValueError("No columns specified.")
 
         # Lowercase all column names
         def lower(x):
+            """Just a helper function so we don't need oodles of lambdas"""
             return x.lower()
 
         self.data.columns = map(lower, self.data.columns)
-        self.cat = list(map(lower, categorical))
-        self.num = list(map(lower, numerical))
-        self.boolean = list(map(lower, boolean))
+
+        self.cat = [] if categorical is None else list(map(lower, categorical))
+        self.num = [] if numerical is None else list(map(lower, numerical))
+        self.boolean = [] if boolean is None else list(map(lower, boolean))
+
+        if self.cat + self.num + self.boolean == []:
+            raise ValueError("No columns specified.")
+
         missing = ((set(self.cat) | set(self.num) | set(self.boolean)) -
                    set(self.data.columns))
         if len(missing) > 0:
@@ -233,10 +237,16 @@ class TableOne:
             self.data.loc[invalid[column], column] = np.nan
 
     def analyze_categorical(self, as_str: bool = False) -> pd.DataFrame:
+        if self.cat == []:
+            return pd.DataFrame()
+
         out = self.counts(self.cat, as_str=as_str).reset_index(drop=True)
         return out
 
     def analyze_numeric(self, as_str: bool = False) -> pd.DataFrame:
+        if self.num == []:
+            return pd.DataFrame()
+
         if invalid := self.id_invalid():
             raise ValueError("Invalid values found in numeric columns: "
                              f"{invalid}")
@@ -249,6 +259,9 @@ class TableOne:
 
     def analyze_boolean(self, as_str: bool = False) -> pd.DataFrame:
         out = pd.DataFrame()
+        if self.boolean == []:
+            return out
+
         for col in self.boolean:
             counts = self.counts(col + "_bool", as_str=as_str)
             to_add = counts[counts[_category] == "    True"].copy()

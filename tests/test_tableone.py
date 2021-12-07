@@ -256,7 +256,7 @@ class TestTableOne(unittest.TestCase):
                              header=0,
                              names=["category", ""])
         expect = expect.fillna("")
-        table = tableone.TableOne(df, ["Col1", "Col2"], [])
+        table = tableone.TableOne(df, ["Col1", "Col2"])
         assert_frame_equal(table.analyze_categorical(as_str=True), expect)
 
     def test_analyze_categorical_no_str(self):
@@ -272,7 +272,7 @@ class TestTableOne(unittest.TestCase):
         expect["paren"] = expect["paren"].str.extract(r"(\d+)").astype(
             float) / 100
         expect = expect.fillna("")
-        table = tableone.TableOne(df, ["Col1", "Col2"], [])
+        table = tableone.TableOne(df, ["Col1", "Col2"])
         assert_frame_equal(table.analyze_categorical(), expect)
 
     def test_analyze_numeric_str(self):
@@ -293,12 +293,12 @@ class TestTableOne(unittest.TestCase):
                 f"{df['Col2'].median():.2f} ({iqr(df['Col2']):.2f})"
             ]
         })
-        table = tableone.TableOne(df, [], ["Col1", "Col2"])
+        table = tableone.TableOne(df, numerical=["Col1", "Col2"])
         assert_frame_equal(table.analyze_numeric(as_str=True), expect)
 
     def test_numeric_invalid(self):
         df = pd.read_csv(os.path.join(test_path, "test1.csv"))
-        table = tableone.TableOne(df, [], ["Col1", "Col2", "Col3"])
+        table = tableone.TableOne(df, numerical=["Col1", "Col2", "Col3"])
         with self.assertRaises(ValueError):
             table.analyze_numeric(as_str=True)
 
@@ -321,7 +321,7 @@ class TestTableOne(unittest.TestCase):
                 iqr(df['Col2'])
             ]
         })
-        table = tableone.TableOne(df, [], ["Col1", "Col2"])
+        table = tableone.TableOne(df, numerical=["Col1", "Col2"])
         assert_frame_equal(table.analyze_numeric(), expect)
 
     def test_analyze_str(self):
@@ -349,8 +349,15 @@ class TestTableOne(unittest.TestCase):
         expect_categorical = expect_categorical.fillna("")
         expect = pd.concat([expect_categorical,
                             expect_numeric]).reset_index(drop=True)
-        table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"])
-        assert_frame_equal(table.analyze(as_str=True), expect)
+
+        table_1 = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"])
+        assert_frame_equal(table_1.analyze(as_str=True), expect)
+
+        table_1 = tableone.TableOne(df, categorical=["Col1", "Col2"])
+        assert_frame_equal(table_1.analyze(as_str=True), expect_categorical)
+
+        table_2 = tableone.TableOne(df, numerical=["Col1", "Col2"])
+        assert_frame_equal(table_2.analyze(as_str=True), expect_numeric)
 
     def test_analyze_no_str(self):
         df = pd.read_csv(os.path.join(test_path, "test1.csv"))
