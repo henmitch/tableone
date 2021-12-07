@@ -575,13 +575,16 @@ class TestTableOne(unittest.TestCase):
                                   groupings=["Col1", "Col2"])
         assert_frame_equal(table.counts().fillna(""), expect)
 
-    def test_booleanize_no_fillna(self):
         df = pd.read_csv(os.path.join(test_path, "booleanize_expect.csv"))
         expect = pd.Series([False, True, np.nan, True])
         for col in df.columns:
             with self.subTest(col=col):
                 expect.name = col
                 assert_series_equal(booleanize(df[col]), expect)
+
+        col = pd.Series(["Value1", "Value2", "Value1"], dtype="category")
+        with self.assertRaises(ValueError):
+            booleanize(col)
 
     def test_booleanize__fillna(self):
         df = pd.read_csv(os.path.join(test_path, "booleanize_expect.csv"))
