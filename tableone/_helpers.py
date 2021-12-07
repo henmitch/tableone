@@ -148,12 +148,13 @@ def booleanize(col: pd.Series, fillna: bool = None) -> pd.Series:
     except (ValueError, TypeError):
         pass
 
-    if np.issubdtype(col.dtype, np.number):
+    if pd.api.types.is_numeric_dtype(col):
         out = (col > 0)
-    elif col.dtype == object:
+    elif col.dtype in [object, pd.StringDtype]:
         out = col.str.upper().apply(lambda x: _bool_conversion.get(x, None))
     else:
-        out = col
+        raise ValueError(f"Could not convert column {col.name} from type "
+                         f"{col.dtype} to boolean.")
 
     out[col.isna()] = None
     if fillna is not None:
