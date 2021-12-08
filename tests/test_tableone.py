@@ -3,6 +3,7 @@ import re
 import ast
 import os
 import unittest
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -81,7 +82,7 @@ class TestTableOne(unittest.TestCase):
         assert_frame_equal(table.mean_and_sd("Col2"), second_expect)
         assert_frame_equal(table.mean_and_sd(), third_expect)
         assert_frame_equal(table.mean_and_sd(["Col1", "Col2"]), third_expect)
-        with self.assertWarns(UserWarning):
+        with self.assertRaises(TypeError):
             table.mean_and_sd("Col3")
 
     def test_mean_and_sd_str(self):
@@ -125,7 +126,7 @@ class TestTableOne(unittest.TestCase):
         assert_frame_equal(table.mean_and_ci("Col2"), second_expect)
         assert_frame_equal(table.mean_and_ci(), third_expect)
         assert_frame_equal(table.mean_and_ci(["Col1", "Col2"]), third_expect)
-        with self.assertWarns(UserWarning):
+        with self.assertRaises(TypeError):
             table.mean_and_ci("Col3")
 
     def test_mean_and_ci_str(self):
@@ -157,7 +158,7 @@ class TestTableOne(unittest.TestCase):
         assert_frame_equal(table.mean_and_ci(as_str=True), third_expect)
         assert_frame_equal(table.mean_and_ci(["Col1", "Col2"], as_str=True),
                            third_expect)
-        with self.assertWarns(UserWarning):
+        with self.assertRaises(TypeError):
             table.mean_and_ci("Col3")
 
     def test_median_and_iqr(self):
@@ -175,13 +176,15 @@ class TestTableOne(unittest.TestCase):
         assert_frame_equal(table.median_and_iqr(["Col1", "Col2"]),
                            third_expect)
         assert_frame_equal(table.median_and_iqr(), third_expect)
-        with self.assertWarns(UserWarning):
+        with self.assertRaises(TypeError):
             table.median_and_iqr("Col3")
 
     def test_counts(self):
         """Test the counts"""
         df = pd.read_csv(os.path.join(test_path, "test1.csv"))
-        table = tableone.TableOne(df, ["Col1", "Col2"], ["Col3"])
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            table = tableone.TableOne(df, ["Col1", "Col2"], ["Col3"])
 
         counts_1_path = os.path.join(test_path, "counts1_expect.csv")
         counts_2_path = os.path.join(test_path, "counts2_expect.csv")
@@ -196,13 +199,13 @@ class TestTableOne(unittest.TestCase):
                            check_column_type=False)
         assert_frame_equal(table.counts("Col2"), second_expect)
         assert_frame_equal(table.counts(), third_expect)
-        with self.assertWarns(UserWarning):
-            table.counts("Col3")
 
     def test_counts_str(self):
         """Test the counts"""
         df = pd.read_csv(os.path.join(test_path, "test1.csv"))
-        table = tableone.TableOne(df, ["Col1", "Col2"], ["Col3"])
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            table = tableone.TableOne(df, ["Col1", "Col2"], ["Col3"])
 
         counts_1_path = os.path.join(test_path, "counts1_expect_str.csv")
         counts_2_path = os.path.join(test_path, "counts2_expect_str.csv")
@@ -223,21 +226,27 @@ class TestTableOne(unittest.TestCase):
         data = pd.read_csv(os.path.join(test_path, "test1.csv"))
 
         # Identifying invalid data
-        table = tableone.TableOne(data, [], ["Col1", "Col2", "Col3"])
-        invalid = table.id_invalid()
-        self.assertEqual(invalid, {"col3": [0, 7]})
+        with self.assertWarns(UserWarning,
+                              msg="Dropping invalid values found "
+                              "in numeric columns: "
+                              "{'col3': [0, 7]}"):
+            tableone.TableOne(data, [], ["Col1", "Col2", "Col3"])
 
         # There should be no invalid data
-        table = tableone.TableOne(data, [], ["Col1", "Col2"])
-        invalid = table.id_invalid()
-        self.assertEqual(invalid, {})
+        with warnings.catch_warnings(record=True) as w:
+            tableone.TableOne(data, [], ["Col1", "Col2"])
+        self.assertEqual(len(w), 0)
 
     def test_drop_invalid(self):
         df = pd.read_csv(os.path.join(test_path, "test1.csv"))
-        table = tableone.TableOne(df, [], ["Col1", "Col2", "Col3"])
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            table = tableone.TableOne(df, [], ["Col1", "Col2", "Col3"])
+        table.data.loc[[0, 4, 7], "col3"] = "I'm invalid"
         expect = df.copy()
         expect.columns = map(lambda x: x.lower(), expect.columns)
         expect.loc[[0, 4, 7], "col3"] = np.nan
+        expect["col3"] = expect["col3"].astype(float)
         table.drop_invalid()
         assert_frame_equal(table.data, expect)
 
@@ -245,9 +254,11 @@ class TestTableOne(unittest.TestCase):
         """Test the NaN counting"""
         data = pd.read_csv(os.path.join(test_path, "test1.csv"))
 
-        table = tableone.TableOne(data, ["Col1", "Col2"],
-                                  ["Col1", "Col2", "Col3"])
-        expect = pd.Series([0, 0, 1], index=["col1", "col2", "col3"])
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            table = tableone.TableOne(data, ["Col1", "Col2"],
+                                      ["Col1", "Col2", "Col3"])
+        expect = pd.Series([0, 0, 3], index=["col1", "col2", "col3"])
         pd.testing.assert_series_equal(table.count_na(), expect)
 
     def test_prettify(self):
@@ -332,9 +343,8 @@ class TestTableOne(unittest.TestCase):
 
     def test_numeric_invalid(self):
         df = pd.read_csv(os.path.join(test_path, "test1.csv"))
-        table = tableone.TableOne(df, [], ["Col1", "Col2", "Col3"])
-        with self.assertRaises(ValueError):
-            table.analyze_numeric(as_str=True)
+        with self.assertWarns(UserWarning):
+            tableone.TableOne(df, [], ["Col1", "Col2", "Col3"])
 
     def test_analyze_numeric_no_str(self):
         df = pd.read_csv(os.path.join(test_path, "test1.csv"))
@@ -606,7 +616,7 @@ class TestTableOne(unittest.TestCase):
         expect = expect.rename(columns={"Unnamed: 1": ""}).fillna("")
 
         table = tableone.TableOne(df, ["Col1", "Col2"], [], ["Col1", "Col2"])
-        assert_frame_equal(table.counts().fillna(""), expect)
+        assert_frame_equal(table.counts().fillna(0.0), expect)
 
 
 if __name__ == '__main__':

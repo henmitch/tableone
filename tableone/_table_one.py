@@ -46,6 +46,14 @@ class TableOne:
         self.data = self.data[columns]
         self.n = len(self.data)
 
+        if invalid := self.id_invalid():
+            warnings.warn("Dropping invalid values found in numeric columns: "
+                          f"{invalid}")
+        self.drop_invalid()
+
+        for col in self.num:
+            self.data[col] = pd.to_numeric(self.data[col])
+
         if isinstance(groupings, str):
             groupings = [groupings]
         self.groupings = [] if groupings is None else list(
@@ -59,6 +67,167 @@ class TableOne:
 
     def __str__(self) -> str:
         return f"TableOne({self.n} patients)"
+
+    def _split_groupings(self) -> Dict[str, pd.DataFrame]:
+        """Split the data into the provided groups"""
+        out = dict()
+        for col in self.groupings:
+            grpby = self.data.groupby(col)
+            out |= {
+                f"{col} = {idx}": grp.reset_index(drop=True)
+                for idx, grp in grpby
+            }
+        return out
+
+    def _calc(self,
+              col_name: Union[str, list],
+              func: Callable,
+              as_str: bool = False,
+              name: str = "",
+              split: bool = True,
+              **params) -> pd.DataFrame:
+        """A generic function to calculate center and spread
+
+        :param col_name: The column or columns to analyze.
+        :type col_name: str or list
+        :param val_func: The function to calculate the value.
+        :type val_func: Callable
+        :param spread_func: The function to calculate the spread.
+        :type spread_func: Callable
+        :param text: The text to use for the resultant row.
+        :type text: str
+        :param as_str: Whether to return the result as a dataframe of strings.
+        :type as_str: bool
+        :param name: The name of the resultant column.
+        :type name: str
+        :param split: Whether to split the column based on groupings.
+        :type split: bool
+
+        :return: A dataframe with the center and spread of the data
+        :rtype: pd.DataFrame
+        """
+        data = self.data.copy()
+
+        # The groupings to split into
+        split_groupings = self._split_groupings()
+        names = [f"All patients (n = {self.n})"] + [
+            f"{idx} (n = {len(group)})"
+            for idx, group in split_groupings.items()
+        ]
+
+        # If we're only analyzing one column, we need it lowercase
+        if not isinstance(col_name, str):
+            out = pd.concat([
+                self._calc(c,
+                           func,
+                           as_str=False,
+                           name=name,
+                           split=split,
+                           **params) for c in col_name
+            ]).reset_index(drop=True)
+            if as_str:
+                out = prettify(out, name=names)
+            return out
+
+        col_name = col_name.lower()
+
+        if (not self.groupings) or (not split):
+            # Just doing all the data
+            out = func(data[col_name], name=name, **params)
+            if as_str:
+                out = prettify(out, name=names[0])
+            return out
+
+        # Analyizing each group separately
+        out = func(data[col_name], name=name, **params)
+        for idx, group in split_groupings.items():
+            calc = func(group[col_name],
+                        name=f"{idx} (n = {len(group)})",
+                        **params)
+            calc.columns = [_category
+                            ] + [f"{c} ({idx})" for c in [_value, _paren]]
+            out = out.merge(calc, how="outer", suffixes=["", " " + idx])
+
+        if as_str:
+            out = prettify(out, name=names)
+
+        return out
+
+    def _num_calc(self,
+                  col_name: Union[str, list],
+                  val_func: Callable,
+                  spread_func: Callable,
+                  text: str = None,
+                  as_str: bool = False,
+                  name: str = "",
+                  split: bool = True) -> pd.DataFrame:
+        """A generic function to calculate center and spread
+
+        :param col_name: The column or columns to analyze.
+        :type col_name: str or list
+        :param val_func: The function to calculate the value.
+        :type val_func: Callable
+        :param spread_func: The function to calculate the spread.
+        :type spread_func: Callable
+        :param text: The text to use for the resultant row.
+        :type text: str
+        :param as_str: Whether to return the result as a dataframe of strings.
+        :type as_str: bool
+        :param name: The name of the resultant column.
+        :type name: str
+        :param split: Whether to split the column based on groupings.
+        :type split: bool
+
+        :return: A dataframe with the center and spread of the data
+        :rtype: pd.DataFrame
+        """
+        if col_name is None:
+            col_name = self.num
+
+        out = self._calc(col_name,
+                         func=numerical_calculation,
+                         as_str=as_str,
+                         name=name,
+                         val_func=val_func,
+                         spread_func=spread_func,
+                         text=text,
+                         split=split)
+
+        return out
+
+    def count_na(self) -> pd.Series:
+        """Return the number of missing values per column"""
+        return self.data.isna().sum()
+
+    def id_invalid(self) -> dict:
+        """Identify the invalid values in the numeric columns"""
+        out = dict()
+        for column in self.num:
+            try:
+                pd.to_numeric(self.data[column], errors="raise")
+            except ValueError:
+                coerced = pd.to_numeric(self.data[column], errors="coerce")
+                # Values that can't be coerced to numeric
+                new_na = coerced[coerced.isna()
+                                 & ~self.data[column].isna()].index
+                out[column] = list(new_na)
+
+        return out
+
+    def drop_invalid(self) -> None:
+        """Drop the invalid values in the numeric columns"""
+        invalid = self.id_invalid()
+        for column in invalid:
+            self.data.loc[invalid[column], column] = np.nan
+            self.data[column] = self.data[column].astype(float)
+
+    def analyze_numeric(self, as_str: bool = False) -> pd.DataFrame:
+        out = pd.concat([
+            self.mean_and_sd(self.num, as_str=as_str),
+            self.mean_and_ci(self.num, as_str=as_str),
+            self.median_and_iqr(self.num, as_str=as_str)
+        ]).reset_index(drop=True)
+        return out
 
     def mean_and_sd(self,
                     col: Union[str, list] = None,
@@ -130,82 +299,8 @@ class TableOne:
 
         return self._num_calc(col, _mean, _ci, as_str=as_str)
 
-    def _num_calc(self,
-                  col_name: Union[str, list],
-                  val_func: Callable,
-                  spread_func: Callable,
-                  text: str = None,
-                  as_str: bool = False,
-                  name: str = "",
-                  split: bool = True) -> pd.DataFrame:
-        """A generic function to calculate center and spread
-
-        :param col_name: The column or columns to analyze.
-        :type col_name: str or list
-        :param val_func: The function to calculate the value.
-        :type val_func: Callable
-        :param spread_func: The function to calculate the spread.
-        :type spread_func: Callable
-        :param text: The text to use for the resultant row.
-        :type text: str
-        :param as_str: Whether to return the result as a dataframe of strings.
-        :type as_str: bool
-        :param name: The name of the resultant column.
-        :type name: str
-        :param split: Whether to split the column based on groupings.
-        :type split: bool
-
-        :return: A dataframe with the center and spread of the data
-        :rtype: pd.DataFrame
-        """
-        params = {
-            "val_func": val_func,
-            "spread_func": spread_func,
-            "text": text
-        }
-        data = self.data.copy()
-
-        # The groupings to split into
-        split_groupings = self._split_groupings()
-        names = [f"All patients (n = {self.n})"] + [
-            f"{idx} (n = {len(group)})"
-            for idx, group in split_groupings.items()
-        ]
-
-        # If we're only analyzing one column, we need it lowercase
-        if isinstance(col_name, str):
-            col_name = col_name.lower()
-            if not col_name in self.num:
-                warnings.warn(f"{col_name} is not a numeric column.")
-                data[col_name] = pd.to_numeric(col_name, errors="coerce")
-
-        # We can look at all columns together, since they'll be uniquely
-        # indexed
-        if isinstance(col_name, list):
-            col_name = list(map(str.lower, col_name))
-        # If unspecified, just do all of them.
-        if col_name is None:
-            col_name = self.num
-
-        # TODO: Refactor this
-        if (not self.groupings) or (not split):
-            out = numerical_calculation(data[col_name], **params, name=name)
-            if as_str:
-                out = prettify(out, name=names[0])
-            return out
-
-        out = numerical_calculation(data[col_name], **params, name=name)
-        for idx, group in split_groupings.items():
-            calc = numerical_calculation(group[col_name],
-                                         **params,
-                                         name=f"{idx} (n = {len(group)})")
-            calc.columns = [_category
-                            ] + [f"{c} ({idx})" for c in [_value, _paren]]
-            out = out.merge(calc, how="outer", suffixes=["", " " + idx])
-
-        if as_str:
-            out = prettify(out, name=names)
-
+    def analyze_categorical(self, as_str: bool = False) -> pd.DataFrame:
+        out = self.counts(self.cat, as_str=as_str).reset_index(drop=True)
         return out
 
     def counts(self,
@@ -214,91 +309,15 @@ class TableOne:
                name: str = "",
                split: bool = True) -> pd.DataFrame:
         """Return the counts of a column"""
-        data = self.data.copy()
         if col_name is None:
-            return self.counts(self.cat, as_str=as_str)
+            col_name = self.cat
 
-        split_groupings = self._split_groupings()
-        names = [f"All patients (n = {self.n})"] + [
-            f"{idx} (n = {len(group)})"
-            for idx, group in split_groupings.items()
-        ]
-        if not isinstance(col_name, str):
-            out = pd.concat([
-                self.counts(c, as_str=False, name=name, split=split)
-                for c in col_name
-            ]).fillna(0).reset_index(drop=True)
-            if as_str:
-                out = prettify(out, name=names)
-            return out
+        out = self._calc(col_name,
+                         func=categorical_calculation,
+                         as_str=as_str,
+                         name=name,
+                         split=split)
 
-        col_name = col_name.lower()
-        if not col_name in self.cat:
-            warnings.warn(f"{col_name} is not a categorical column.")
-
-        if (not self.groupings) or (not split):
-            out = categorical_calculation(data[col_name], name=name)
-            if as_str:
-                out = prettify(out, name=names[0])
-            return out
-
-        out = categorical_calculation(data[col_name], name=name)
-        for idx, group in split_groupings.items():
-            calc = categorical_calculation(group[col_name],
-                                           name=f"{idx} (n = {len(group)})")
-            calc.columns = [_category
-                            ] + [f"{c} ({idx})" for c in [_value, _paren]]
-
-            out = out.merge(calc,
-                            on=_category,
-                            how="outer",
-                            suffixes=["", " " + idx])
-
-        out = out.fillna(0)
-
-        if as_str:
-            out = prettify(out, name=names)
-
-        return out
-
-    def count_na(self) -> pd.Series:
-        """Return the number of missing values per column"""
-        return self.data.isna().sum()
-
-    def id_invalid(self) -> dict:
-        """Identify the invalid values in the numeric columns"""
-        out = dict()
-        for column in self.num:
-            try:
-                pd.to_numeric(self.data[column], errors="raise")
-            except ValueError:
-                coerced = pd.to_numeric(self.data[column], errors="coerce")
-                # Values that can't be coerced to numeric
-                new_na = coerced[coerced.isna()
-                                 & ~self.data[column].isna()].index
-                out[column] = list(new_na)
-
-        return out
-
-    def drop_invalid(self) -> None:
-        """Drop the invalid values in the numeric columns"""
-        invalid = self.id_invalid()
-        for column in invalid:
-            self.data.loc[invalid[column], column] = np.nan
-
-    def analyze_categorical(self, as_str: bool = False) -> pd.DataFrame:
-        out = self.counts(self.cat, as_str=as_str).reset_index(drop=True)
-        return out
-
-    def analyze_numeric(self, as_str: bool = False) -> pd.DataFrame:
-        if invalid := self.id_invalid():
-            raise ValueError("Invalid values found in numeric columns: "
-                             f"{invalid}")
-        out = pd.concat([
-            self.mean_and_sd(self.num, as_str=as_str),
-            self.mean_and_ci(self.num, as_str=as_str),
-            self.median_and_iqr(self.num, as_str=as_str)
-        ]).reset_index(drop=True)
         return out
 
     def analyze(self, as_str: bool = False) -> pd.DataFrame:
@@ -306,15 +325,4 @@ class TableOne:
             self.analyze_categorical(as_str=as_str),
             self.analyze_numeric(as_str=as_str)
         ]).reset_index(drop=True)
-        return out
-
-    def _split_groupings(self) -> Dict[str, pd.DataFrame]:
-        """Split the data into the provided groups"""
-        out = dict()
-        for col in self.groupings:
-            grpby = self.data.groupby(col)
-            out |= {
-                f"{col} = {idx}": grp.reset_index(drop=True)
-                for idx, grp in grpby
-            }
         return out

@@ -90,6 +90,8 @@ def prettify(df: pd.DataFrame,
                 printed[n] = ""
                 continue
             if isinstance(val, float):
+                if val is None or np.isnan(val):
+                    val = 0
                 val = f"{val:.2f}"
 
             if isinstance(paren, str):
@@ -102,6 +104,8 @@ def prettify(df: pd.DataFrame,
                 printed[n] = f"{val} ({paren:.2f})"
             else:
                 # Percentages
+                if paren is None or np.isnan(paren):
+                    paren = 0
                 printed[n] = f"{float(val):.0f} ({paren:.2%})"
         return printed
 
