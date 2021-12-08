@@ -36,8 +36,8 @@ def ci(ser: pd.Series, confidence: float = 0.95) -> Tuple[float, float]:
     n = ser.size
     df = n - 1
     t_score = scipy.stats.t.interval(confidence, df=df)
-    low = mean + t_score[0] * ser.std() / np.sqrt(n)
-    high = mean + t_score[1] * ser.std() / np.sqrt(n)
+    low = mean + t_score[0]*ser.std()/np.sqrt(n)
+    high = mean + t_score[1]*ser.std()/np.sqrt(n)
     return (low, high)
 
 
@@ -119,7 +119,7 @@ def categorical_calculation(col: Union[pd.Series, List[pd.Series]],
     unnormed.index.name = _category
 
     # The counts, normalized
-    normed = unnormed / n
+    normed = unnormed/n
     normed.name = _paren
     normed.index.name = _category
 

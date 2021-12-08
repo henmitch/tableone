@@ -234,7 +234,7 @@ class TestTableOne(unittest.TestCase):
                 "Median value (paren)", "Percent", "Empty"
             ],
             "Value":
-                5 * [1.066] + [np.nan],
+                5*[1.066] + [np.nan],
             "Paren": [
                 "A string", (0.6634, 100.023), 0.0452, 0.0452, 0.04526, np.nan
             ]
@@ -270,7 +270,7 @@ class TestTableOne(unittest.TestCase):
         expect = expect[_columns]
         expect["value"] = expect["value"].astype(float)
         expect["paren"] = expect["paren"].str.extract(r"(\d+)").astype(
-            float) / 100
+            float)/100
         expect = expect.fillna("")
         table = tableone.TableOne(df, ["Col1", "Col2"])
         assert_frame_equal(table.analyze_categorical(), expect)
@@ -392,7 +392,7 @@ class TestTableOne(unittest.TestCase):
         expect_categorical = expect_categorical[_columns]
         expect_categorical["value"] = expect_categorical["value"].astype(float)
         expect_categorical["paren"] = expect_categorical["paren"].str.extract(
-            "(\d+)").astype(float) / 100
+            "(\d+)").astype(float)/100
         expect = pd.concat([expect_categorical,
                             expect_numeric]).reset_index(drop=True)
         expect = expect.fillna("")
