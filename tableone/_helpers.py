@@ -1,3 +1,4 @@
+"""Helper functions"""
 import re
 import warnings
 from typing import Callable, List, Tuple, Union
@@ -6,7 +7,7 @@ import numpy as np
 import pandas as pd
 import scipy.stats
 
-_category, _value, _paren = _columns = ["category", "value", "paren"]
+_category, _value, _paren, = _columns = ["category", "value", "paren"]
 
 _bool_conversion = {
     "TRUE": True,
@@ -46,31 +47,90 @@ def iqr(ser: pd.Series) -> float:
     return ser.quantile(0.75) - ser.quantile(0.25)
 
 
-def prettify(df: pd.DataFrame, name: str = "") -> pd.DataFrame:
+def prettify(df: pd.DataFrame,
+             name: Union[str, List[str]] = "") -> pd.DataFrame:
+    """Prettify a dataframe
+
+    For example::
+        >>> df = pd.DataFrame([["Mean data (SD)", 1.256, 0.254],
+        ...                    ["Median data (IQR)", 2.564, 2.543]]])
+        >>> prettify(df, name="Statistic)
+        category            Statistic
+        Mean data (SD)      1.26 (0.25)
+        Median data (IQR)   2.56 (2.54)
+        >>> df = pd.DataFrame([["Count 1", 10, 0.0314159],
+        ...                    ["Count 2", 20, 0.0271828]])
+        >>> prettify(df, name="Count")
+        category  Count
+        Count 1    10 (3.14%)
+        Count 2    20 (2.72%)
+        >>> df = pd.DataFrame([["Mean data1 (95% CI)", 1.256, (0.523, 1.523)],
+        ...                    ["Mean data2 (95% CI)", 2.564, (1.523, 2.523)]])
+        >>> prettify(df, name="Statistic")
+        category             Statistic
+        Mean data1 (95% CI)  1.26 (0.52, 1.52)
+        Mean data2 (95% CI)  2.56 (1.52, 2.52)
+        >>> df = pd.DataFrame([["Count 1", 10, 0.0314159, 20, 0.0271828],
+        ...                    ["Count 2", 20, 0.0271828, 30, 0.0245283]])
+        >>> prettify(df, name=["Count1", "Count2"])
+        category   Count1      Count2
+        Count 1    10 (3.14%)  20 (2.72%)
+        Count 2    20 (2.72%)  30 (2.45%)
+
+    :param df: The dataframe to prettify
+    :type df: pd.DataFrame
+    :param name: The name or names of the output column or columns
+    :type name: str or list of str
+
+    :return: The prettified dataframe
+    :rtype: pd.DataFrame
+    """
     out = df.set_index(df.columns[0])
+    val_paren_cols = [
+        column for column in out.columns
+        if "value" in column or "paren" in column
+    ]
+    p_cols = [column for column in out.columns if "p (" in column]
+    if not isinstance(name, str) and len(name) != len(val_paren_cols)/2:
+        raise ValueError("name must be half in length as the number of "
+                         f"columns. Instead, got {len(name)} names "
+                         f"and {len(out.columns)} columns.")
+    if isinstance(name, str):
+        name = [name]
 
     # To apply row by row
-    def print_proper(row: pd.Series) -> str:
-        val = row.iloc[0]
-        paren = row.iloc[1]
-        if row.eq("").all() or row.isna().all():
-            return ""
-        if isinstance(val, float):
-            val = f"{val:.2f}"
+    def print_proper(row: pd.Series) -> pd.DataFrame:
+        printed = pd.Series(dtype="object", index=name)
+        for i, n in enumerate(name):
+            val = row.iloc[2*i + 0]
+            paren = row.iloc[2*i + 1]
+            if row.eq("").all() or row.isna().all():
+                printed[n] = ""
+                continue
+            if isinstance(val, float):
+                if val is None or np.isnan(val):
+                    val = 0
+                val = f"{val:.2f}"
 
-        if isinstance(paren, str):
-            return f"{val} ({paren})"
-        # Confidence intervals
-        if isinstance(paren, tuple):
-            return f"{val} ({paren[0]:.2f}, {paren[1]:.2f})"
-        # Means and medians
-        if re.match(r"Me(?:di)?an .* \(.+\)", row.name):
-            return f"{val} ({paren:.2f})"
-        # Percentages
-        return f"{float(val):.0f} ({paren:.2%})"
+            if isinstance(paren, str):
+                printed[n] = f"{val} ({paren})"
+            elif isinstance(paren, tuple):
+                # Confidence intervals
+                printed[n] = f"{val} ({paren[0]:.2f}, {paren[1]:.2f})"
+            elif re.match(r"Me(?:di)?an .* \(.+\)", row.name):
+                # Means and medians
+                printed[n] = f"{val} ({paren:.2f})"
+            else:
+                # Percentages
+                if paren is None or np.isnan(paren):
+                    paren = 0
+                printed[n] = f"{float(val):.0f} ({paren:.2%})"
+        return printed
 
-    out[name] = out.apply(print_proper, axis=1)
-    out = out.reset_index()[[_category, name]]
+    out[name] = out[val_paren_cols].apply(print_proper, axis=1)
+    for p_col in p_cols:
+        out[p_col] = out[p_col].apply(lambda x: f"{x:.3g}").replace("nan", "")
+    out = out.reset_index()[[_category] + name + p_cols]
     return out
 
 
@@ -78,15 +138,42 @@ def numerical_calculation(col: Union[pd.Series, List[pd.Series], pd.DataFrame],
                           val_func: Callable,
                           spread_func: Callable,
                           text: str = None,
-                          as_str: bool = None,
                           name: str = "") -> pd.DataFrame:
+    """Calculate a numerical statistic for a column
+
+    For example::
+        >>> col = pd.Series([1, 2, 3, 4, 5], name="A")
+        >>> numerical_calculation(col, np.mean, np.std)
+        category      value  paren
+        Mean A (std)  2.50   0.50
+        >>> numerical_calculation(col, np.mean, np.std, as_str=True)
+        category      Mean
+        Mean A (std)  2.50 (0.50)
+
+    :param col: The column to calculate the statistic for
+    :type col: pd.Series or list of pd.Series
+    :param val_func: The function to calculate the value
+    :type val_func: Callable
+    :param spread_func: The function to calculate the spread
+    :type spread_func: Callable
+    :param text: The name of the resulting row. Defaults to
+        ``{val_func.__name__} {col.name} ({spread_func.__name__})``
+    :type text: str
+    :param as_str: Whether to return the output as a dataframe of strings.
+        Defaults to ``False``.
+    :type as_str: bool
+    :param name: The name of the resulting column. Defaults to ``""``.
+    :type name: str
+
+    :return: The calculated statistic dataframe
+    :rtype: pd.DataFrame
+    """
     if isinstance(col, pd.DataFrame):
         return pd.concat([
             numerical_calculation(col[c],
                                   val_func,
                                   spread_func,
                                   text,
-                                  as_str,
                                   name=name) for c in col.columns
         ]).reset_index(drop=True)
 
@@ -97,22 +184,63 @@ def numerical_calculation(col: Union[pd.Series, List[pd.Series], pd.DataFrame],
 
     out = _to_dataframe(text, (val, spread))
 
-    if as_str:
-        return prettify(out, name=name)
     return out
 
 
 def _to_dataframe(name: str, data: Tuple[float, float]) -> pd.DataFrame:
-    """Return a dataframe with the name and data"""
+    """Return a dataframe with the name and data
+
+    For example::
+        >>> _to_dataframe("Mean", (1.0, 0.1))
+        category  value  paren
+        Mean      1.00   0.10
+
+    :param name: The name of the row
+    :type name: str
+    :param data: The data to put in the row
+    :type data: Tuple[float, float]
+
+    :return: A dataframe with the name and data
+    :rtype: pd.DataFrame
+    """
     if len(data) > 2:
         warnings.warn(f"Too many data points provided for {name} and the "
                       "extras will be dropped.")
-    return pd.DataFrame([[name, data[0], data[1]]], columns=_columns)
+    return pd.DataFrame([[name, data[0], data[1]]], columns=_columns[:3])
 
 
-def categorical_calculation(col: Union[pd.Series, List[pd.Series]],
-                            as_str: bool = False,
+def categorical_calculation(col: Union[pd.Series, List[pd.Series],
+                                       pd.DataFrame],
                             name: str = "") -> pd.DataFrame:
+    """Counts the number of times each category occurs in a column
+
+    For example::
+        >>> col = pd.Series(["a", "b", "a", "b", "a", "b"])
+        >>> categorical_calculation(col)
+        category  value  paren
+        a         2      0.50
+        b         2      0.50
+
+    :param col: The column or columns to count in. If a series, just use the
+        series. If a list of series, concatenate the outputs. If a dataframe,
+        concatenate the outputs of each column
+    :type col: pd.Series or List[pd.Series] or pd.DataFrame
+    :param as_str: Whether to return the data as a dataframe of strings or a
+        dataframe of floats.
+    :type as_str: bool
+    :param name: The name of the output columns.
+
+    :return: A dataframe of the counts.
+    :rtype: pd.DataFrame
+    """
+    if isinstance(col, pd.DataFrame):
+        return pd.concat(
+            [categorical_calculation(col[c], name) for c in col.columns],
+            axis=0).reset_index(drop=True)
+    if isinstance(col, list):
+        return pd.concat([categorical_calculation(c, name) for c in col],
+                         axis=0).reset_index(drop=True)
+
     n = col.size
     unnormed = col.value_counts(dropna=False)
     unnormed.name = _value
@@ -129,8 +257,6 @@ def categorical_calculation(col: Union[pd.Series, List[pd.Series]],
     out = out.sort_values([_value, _category], ascending=(False, True))
     out = pd.concat([top_row, out]).reset_index(drop=True)
 
-    if as_str:
-        return prettify(out, name=name)
     return out
 
 
@@ -161,3 +287,28 @@ def booleanize(col: pd.Series, fillna: bool = None) -> pd.Series:
         out = out.fillna(fillna)
 
     return out
+
+
+def chi_square(column: pd.Series, condition: pd.Series) -> float:
+    condition = condition.astype(bool)
+    trues = column[condition].value_counts().to_frame()
+    falses = column[~condition].value_counts().to_frame()
+    data = trues.join(falses, how="outer", rsuffix="_false").fillna(0).values
+    expect = (data.sum(axis=0)*data.sum(axis=1).reshape(-1, 1))/data.sum()
+    chi = scipy.stats.chisquare(data, expect, axis=None)
+
+    return chi[1]
+
+
+def ttest(column: pd.Series, condition: pd.Series) -> float:
+    condition = condition.astype(bool)
+    trues = column[condition].values
+    falses = column[~condition].values
+    return scipy.stats.ttest_ind(trues, falses)[1]
+
+
+def median_test(column: pd.Series, condition: pd.Series):
+    condition = condition.astype(bool)
+    trues = column[condition].values
+    falses = column[~condition].values
+    return scipy.stats.median_test(trues, falses)[1]

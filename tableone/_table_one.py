@@ -1,23 +1,37 @@
 """For the Table One class"""
 import warnings
-from typing import Callable, Dict, Tuple, Union
+from typing import Callable, Dict, List, Tuple, Union
 
 import numpy as np
 import pandas as pd
 
-from ._helpers import (_category, _columns, _paren, _value, booleanize,
-                       categorical_calculation)
+from ._helpers import (_category, _paren, _value, booleanize,
+                       categorical_calculation, chi_square)
 from ._helpers import ci as ci_
-from ._helpers import iqr, numerical_calculation
+from ._helpers import iqr, median_test, numerical_calculation, prettify, ttest
 
 
 class TableOne:
+    """A class to hold and analyze data for a Table One
+
+    :param data: The data to analyze.
+    :type data: pandas.DataFrame
+    :param categorical: The categorical columns to analyze.
+    :type categorical: list
+    :param numerical: The numerical columns to analyze.
+    :type numerical: list
+    :param groupings: The columns to group by.
+    :type groupings: list or str
+    :param compare: The groupings to perform comparison tests on.
+    :type compare: list or str
+    """
     def __init__(self,
                  data: pd.DataFrame,
                  categorical: list = None,
                  numerical: list = None,
                  boolean: list = None,
-                 groupings: Union[list, str] = None):
+                 groupings: Union[List[str], str] = None,
+                 comparisons: Union[List[str], str] = None):
         self.data = data.copy()
 
         # Lowercase all column names
@@ -45,6 +59,13 @@ class TableOne:
         self.data = self.data[columns]
         self.n = len(self.data)
 
+        if invalid := self.id_invalid():
+            warnings.warn("Dropping invalid values found in numeric columns: "
+                          f"{invalid}")
+        self.drop_invalid()
+
+        for col in self.num:
+            self.data[col] = pd.to_numeric(self.data[col])
         for col in self.boolean:
             self.data[col + "_bool"] = booleanize(self.data[col])
 
@@ -56,81 +77,115 @@ class TableOne:
             raise ValueError("Groupings must be columns in data."
                              f" Missing {missing_groupings}")
 
+        if isinstance(comparisons, str):
+            comparisons = [comparisons]
+        self.comparisons = [] if comparisons is None else list(
+            map(lower, comparisons))
+        if missing_compare := (set(self.comparisons) - set(self.groupings)):
+            raise ValueError("Comparison groupings must be groupings."
+                             f" Missing {missing_compare}")
+        if any(self.data[c].nunique() > 2 for c in self.comparisons):
+            raise ValueError("Comparison groups must have at most 2 values.")
+
     def __repr__(self):
         return f"TableOne({self.n} patients)"
 
     def __str__(self) -> str:
         return f"TableOne({self.n} patients)"
 
-    def mean_and_sd(self,
-                    col: Union[str, list] = None,
-                    as_str: bool = False) -> pd.DataFrame:
-        """Return the mean and standard deviation of columns
+    def _split_groupings(self) -> Dict[str, pd.DataFrame]:
+        """Split the data into the provided groups"""
+        out = dict()
+        for col in self.groupings:
+            grpby = self.data.groupby(col)
+            out |= {
+                f"{col} = {idx}": grp.reset_index(drop=True)
+                for idx, grp in grpby
+            }
+        return out
 
-        :param col: The column or columns to analyze.
-        :type col: str or list
+    def _calc(self,
+              col_name: Union[str, list],
+              func: Callable,
+              as_str: bool = False,
+              name: str = "",
+              split: bool = True,
+              test: Callable[[pd.Series, pd.Series], float] = None,
+              **params) -> pd.DataFrame:
+        """A generic function to calculate center and spread
 
-        :returns: A dataframe with the mean and standard deviation of the
-            column.
+        :param col_name: The column or columns to analyze.
+        :type col_name: str or list
+        :param val_func: The function to calculate the value.
+        :type val_func: Callable
+        :param spread_func: The function to calculate the spread.
+        :type spread_func: Callable
+        :param text: The text to use for the resultant row.
+        :type text: str
+        :param as_str: Whether to return the result as a dataframe of strings.
+        :type as_str: bool
+        :param name: The name of the resultant column.
+        :type name: str
+        :param split: Whether to split the column based on groupings.
+        :type split: bool
+
+        :return: A dataframe with the center and spread of the data
+        :rtype: pd.DataFrame
         """
-        def mean(c: pd.Series) -> float:
-            """Return the mean of a column"""
-            return c.mean()
+        data = self.data.copy()
 
-        mean.__name__ = "Mean"
+        # The groupings to split into
+        split_groupings = self._split_groupings()
+        names = [f"All patients (n = {self.n})"] + [
+            f"{idx} (n = {len(group)})"
+            for idx, group in split_groupings.items()
+        ]
 
-        def sd(c: pd.Series) -> float:
-            """Return the standard deviation of a column"""
-            return c.std()
+        # If we're only analyzing one column, we need it lowercase
+        if not isinstance(col_name, str):
+            out = pd.concat([
+                self._calc(c,
+                           func,
+                           as_str=False,
+                           name=name,
+                           split=split,
+                           test=test,
+                           **params) for c in col_name
+            ]).reset_index(drop=True)
+            if as_str:
+                out = prettify(out, name=names)
+            return out
 
-        sd.__name__ = "SD"
+        col_name = col_name.lower()
 
-        return self._num_calc(col, mean, sd, as_str=as_str)
+        if (not self.groupings) or (not split):
+            # Just doing all the data
+            out = func(data[col_name], name=name, **params)
+            if as_str:
+                out = prettify(out, name=names[0])
+            return out
 
-    def median_and_iqr(self,
-                       col: Union[str, list] = None,
-                       as_str: bool = False) -> pd.DataFrame:
-        """Return the median and interquartile range of columns
+        # Analyizing each group separately
+        out = func(data[col_name], name=name, **params)
+        for idx, group in split_groupings.items():
+            calc = func(group[col_name],
+                        name=f"{idx} (n = {len(group)})",
+                        **params)
+            calc.columns = [_category
+                            ] + [f"{c} ({idx})" for c in [_value, _paren]]
+            out = out.merge(calc, how="outer", suffixes=["", " " + idx])
 
-        :param col: The column or columns to analyze.
-        :type col: str or list
+        # Comparison tests
+        if self.comparisons and test is not None:
+            for comp in self.comparisons:
+                row_idx = out.index[0]
+                out.loc[row_idx, f"p ({comp})"] = test(data[col_name],
+                                                       data[comp])
 
-        :returns: A dataframe with the median and interquartile range of the
-            column.
-        """
-        def median(c: pd.Series) -> float:
-            """Return the median of a column"""
-            return c.median()
+        if as_str:
+            out = prettify(out, name=names)
 
-        median.__name__ = "Median"
-
-        def _iqr(c: pd.Series) -> float:
-            """Return the interquartile range of a column"""
-            return iqr(c)
-
-        _iqr.__name__ = "IQR"
-
-        return self._num_calc(col, median, _iqr, as_str=as_str)
-
-    def mean_and_ci(self,
-                    col: Union[str, list] = None,
-                    as_str: bool = False) -> pd.DataFrame:
-        """Mean and 95% confidence interval"""
-
-        # Just for naming purposes
-        def _mean(c: pd.Series) -> float:
-            """Return the mean of a column"""
-            return c.mean()
-
-        _mean.__name__ = "Mean"
-
-        def _ci(c: pd.Series) -> Tuple[float, float]:
-            """Return the 95% confidence interval of a column"""
-            return ci_(c)
-
-        _ci.__name__ = "95% CI"
-
-        return self._num_calc(col, _mean, _ci, as_str=as_str)
+        return out
 
     def _num_calc(self,
                   col_name: Union[str, list],
@@ -139,76 +194,43 @@ class TableOne:
                   text: str = None,
                   as_str: bool = False,
                   name: str = "",
-                  split: bool = True) -> pd.DataFrame:
-        params = {
-            "val_func": val_func,
-            "spread_func": spread_func,
-            "text": text,
-            "as_str": as_str
-        }
-        data = self.data.copy()
-        if isinstance(col_name, str):
-            col_name = col_name.lower()
-            if not col_name in self.num:
-                warnings.warn(f"{col_name} is not a numeric column.")
-                data[col_name] = pd.to_numeric(col_name, errors="coerce")
-        if isinstance(col_name, list):
-            col_name = list(map(str.lower, col_name))
+                  split: bool = True,
+                  test: Callable = None) -> pd.DataFrame:
+        """A generic function to calculate center and spread
+
+        :param col_name: The column or columns to analyze.
+        :type col_name: str or list
+        :param val_func: The function to calculate the value.
+        :type val_func: Callable
+        :param spread_func: The function to calculate the spread.
+        :type spread_func: Callable
+        :param text: The text to use for the resultant row.
+        :type text: str
+        :param as_str: Whether to return the result as a dataframe of strings.
+        :type as_str: bool
+        :param name: The name of the resultant column.
+        :type name: str
+        :param split: Whether to split the column based on groupings.
+        :type split: bool
+
+        :return: A dataframe with the center and spread of the data
+        :rtype: pd.DataFrame
+        """
         if col_name is None:
             col_name = self.num
+        if self.num == []:
+            return pd.DataFrame()
 
-        if (not self.groupings) or (not split):
-            return numerical_calculation(data[col_name], **params, name=name)
+        out = self._calc(col_name,
+                         func=numerical_calculation,
+                         as_str=as_str,
+                         name=name,
+                         val_func=val_func,
+                         spread_func=spread_func,
+                         text=text,
+                         split=split,
+                         test=test)
 
-        out = numerical_calculation(data[col_name], **params, name=name)
-        for idx, group in self._split_groupings().items():
-            calc = numerical_calculation(group[col_name],
-                                         **params,
-                                         name=f"{idx} (n = {len(group)})")
-            if not as_str:
-                calc.columns = [_category
-                                ] + [f"{c} ({idx})" for c in [_value, _paren]]
-            out = out.merge(calc, how="outer", suffixes=["", " " + idx])
-
-        return out
-
-    def counts(self,
-               col_name: Union[str, list] = None,
-               as_str: bool = False,
-               name: str = "",
-               split: bool = True) -> pd.DataFrame:
-        """Return the counts of a column"""
-        fill = "0 (0.00%)" if as_str else 0
-        if col_name is None:
-            return self.counts(self.cat, as_str=as_str)
-
-        if not isinstance(col_name, str):
-            return pd.concat([
-                self.counts(c, as_str=as_str, name=name, split=split)
-                for c in col_name
-            ]).fillna(fill).reset_index(drop=True)
-
-        col_name = col_name.lower()
-        if not col_name in self.cat + [col + "_bool" for col in self.boolean]:
-            warnings.warn(f"{col_name} is not a categorical or boolean "
-                          "column.")
-
-        if (not self.groupings) or (not split):
-            return categorical_calculation(self.data[col_name], as_str=as_str)
-
-        out = categorical_calculation(self.data[col_name],
-                                      as_str=as_str,
-                                      name=name)
-        for idx, group in self._split_groupings().items():
-            calc = categorical_calculation(group[col_name],
-                                           as_str=as_str,
-                                           name=f"{idx} (n = {len(group)})")
-            if not as_str:
-                calc.columns = [_category
-                                ] + [f"{c} ({idx})" for c in [_value, _paren]]
-
-            out = out.merge(calc, how="outer",
-                            suffixes=["", " " + idx]).fillna(fill)
         return out
 
     def count_na(self) -> pd.Series:
@@ -233,23 +255,11 @@ class TableOne:
     def drop_invalid(self) -> None:
         """Drop the invalid values in the numeric columns"""
         invalid = self.id_invalid()
-        for column in invalid:
-            self.data.loc[invalid[column], column] = np.nan
-
-    def analyze_categorical(self, as_str: bool = False) -> pd.DataFrame:
-        if self.cat == []:
-            return pd.DataFrame()
-
-        out = self.counts(self.cat, as_str=as_str).reset_index(drop=True)
-        return out
+        for column, idxes in invalid.items():
+            self.data.loc[idxes, column] = np.nan
+            self.data[column] = self.data[column].astype(float)
 
     def analyze_numeric(self, as_str: bool = False) -> pd.DataFrame:
-        if self.num == []:
-            return pd.DataFrame()
-
-        if invalid := self.id_invalid():
-            raise ValueError("Invalid values found in numeric columns: "
-                             f"{invalid}")
         out = pd.concat([
             self.mean_and_sd(self.num, as_str=as_str),
             self.mean_and_ci(self.num, as_str=as_str),
@@ -257,7 +267,105 @@ class TableOne:
         ]).reset_index(drop=True)
         return out
 
+    def mean_and_sd(self,
+                    col: Union[str, list] = None,
+                    as_str: bool = False) -> pd.DataFrame:
+        """Return the mean and standard deviation of columns
+
+        :param col: The column or columns to analyze.
+        :type col: str or list
+
+        :returns: A dataframe with the mean and standard deviation of the
+            column.
+        """
+        def mean(c: pd.Series) -> float:
+            """Return the mean of a column"""
+            return c.mean()
+
+        mean.__name__ = "Mean"
+
+        def sd(c: pd.Series) -> float:
+            """Return the standard deviation of a column"""
+            return c.std()
+
+        sd.__name__ = "SD"
+
+        return self._num_calc(col, mean, sd, as_str=as_str, test=ttest)
+
+    def median_and_iqr(self,
+                       col: Union[str, list] = None,
+                       as_str: bool = False) -> pd.DataFrame:
+        """Return the median and interquartile range of columns
+
+        :param col: The column or columns to analyze.
+        :type col: str or list
+
+        :returns: A dataframe with the median and interquartile range of the
+            column.
+        """
+        def median(c: pd.Series) -> float:
+            """Return the median of a column"""
+            return c.median()
+
+        median.__name__ = "Median"
+
+        def _iqr(c: pd.Series) -> float:
+            """Return the interquartile range of a column"""
+            return iqr(c)
+
+        _iqr.__name__ = "IQR"
+
+        return self._num_calc(col,
+                              median,
+                              _iqr,
+                              as_str=as_str,
+                              test=median_test)
+
+    def mean_and_ci(self,
+                    col: Union[str, list] = None,
+                    as_str: bool = False) -> pd.DataFrame:
+        """Mean and 95% confidence interval"""
+
+        # Just for naming purposes
+        def _mean(c: pd.Series) -> float:
+            """Return the mean of a column"""
+            return c.mean()
+
+        _mean.__name__ = "Mean"
+
+        def _ci(c: pd.Series) -> Tuple[float, float]:
+            """Return the 95% confidence interval of a column"""
+            return ci_(c)
+
+        _ci.__name__ = "95% CI"
+
+        return self._num_calc(col, _mean, _ci, as_str=as_str, test=ttest)
+
+    def analyze_categorical(self, as_str: bool = False) -> pd.DataFrame:
+        out = self.counts(self.cat, as_str=as_str).reset_index(drop=True)
+        return out
+
+    def counts(self,
+               col_name: Union[str, list] = None,
+               as_str: bool = False,
+               name: str = "",
+               split: bool = True) -> pd.DataFrame:
+        """Return the counts of a column"""
+        if col_name is None:
+            col_name = self.cat
+        if col_name == []:
+            return pd.DataFrame()
+        out = self._calc(col_name,
+                         func=categorical_calculation,
+                         as_str=as_str,
+                         name=name,
+                         split=split,
+                         test=chi_square)
+
+        return out
+
     def analyze_boolean(self, as_str: bool = False) -> pd.DataFrame:
+        """Analyze boolean columns"""
         out = pd.DataFrame()
         if self.boolean == []:
             return out
@@ -267,7 +375,7 @@ class TableOne:
             to_add = counts[counts[_category] == "    True"].copy()
             to_add[_category] = col.capitalize()
             out = pd.concat([out, to_add])
-        return out.reset_index(drop=True)
+        return out.reset_index(drop=True).fillna(0.0)
 
     def analyze(self, as_str: bool = False) -> pd.DataFrame:
         out = pd.concat([
@@ -275,15 +383,4 @@ class TableOne:
             self.analyze_numeric(as_str=as_str),
             self.analyze_boolean(as_str=as_str)
         ]).reset_index(drop=True)
-        return out
-
-    def _split_groupings(self) -> Dict[str, pd.DataFrame]:
-        """Split the data into the provided groups"""
-        out = dict()
-        for col in self.groupings:
-            grpby = self.data.groupby(col)
-            out |= {
-                f"{col} = {idx}": grp.reset_index(drop=True)
-                for idx, grp in grpby
-            }
         return out
