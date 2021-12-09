@@ -1,8 +1,8 @@
 """Unit-testing the tableone module"""
 # pylint: disable=unused-import
-import re
 import ast
 import os
+import re
 import unittest
 import warnings
 
@@ -12,14 +12,15 @@ from pandas.testing import assert_frame_equal
 
 import tableone
 from tableone._helpers import (_category, _columns, _paren, _to_dataframe,
-                               _value)
+                               _value, categorical_calculation)
 from tableone._helpers import ci as ci_
-from tableone._helpers import iqr, prettify
+from tableone._helpers import iqr, numerical_calculation, prettify
 
 test_path = os.path.join(os.path.dirname(__file__), "test_data")
 
 
 class TestTableOneGeneral(unittest.TestCase):
+    # pylint: disable=no-self-use
     """Unit-testing the tableone module"""
     def test_creation(self):
         """Test the creation of a TableOne object"""
@@ -30,6 +31,14 @@ class TestTableOneGeneral(unittest.TestCase):
         self.assertEqual(table.cat, ["col1"])
         self.assertEqual(table.num, ["col2"])
         self.assertEqual(0, table.n)
+        with self.assertRaises(ValueError):
+            tableone.TableOne(df, ["Col1"], ["Col2"], comparisons=["Col3"])
+
+        too_many = pd.read_csv(os.path.join(test_path, "test1.csv"))
+        with self.assertRaises(ValueError):
+            tableone.TableOne(too_many, ["Col1"], ["Col2"],
+                              groupings=["Col1"],
+                              comparisons=["Col1"])
 
     def test_str(self):
         """Test the string representation"""
@@ -113,9 +122,9 @@ class TestTableOneGeneral(unittest.TestCase):
                 "String", "Tuple", "Mean value (paren)",
                 "Median value (paren)", "Percent", "Empty"
             ],
-            "Value":
+            "value":
                 5 * [1.066] + [np.nan],
-            "Paren": [
+            "paren": [
                 "A string", (0.6634, 100.023), 0.0452, 0.0452, 0.04526, np.nan
             ]
         })
@@ -131,8 +140,8 @@ class TestTableOneGeneral(unittest.TestCase):
 
         data = data.merge(
             data.rename(columns={
-                "Value": "Value2",
-                "Paren": "Paren2"
+                "value": "value2",
+                "paren": "paren2"
             }))
         expect = expect.merge(expect.rename(columns={"": "expect2"}))
         assert_frame_equal(prettify(data, name=["", "expect2"]), expect)
@@ -186,8 +195,37 @@ class TestTableOneGeneral(unittest.TestCase):
             with self.subTest(idx=idx):
                 assert_frame_equal(expect[idx], real[idx])
 
+    def test_categorical_calculation(self):
+        """Test categorical calculations, particularly for df and list input"""
+        df = pd.read_csv(os.path.join(test_path,
+                                      "test1.csv"))[["Col1", "Col2"]]
+        expect1 = pd.read_csv(os.path.join(test_path, "counts1_expect.csv"),
+                              dtype=str)
+        expect2 = pd.read_csv(os.path.join(test_path, "counts2_expect.csv"),
+                              dtype=str)
+        expect = pd.concat([expect1,
+                            expect2]).reset_index(drop=True).fillna("")
+        assert_frame_equal(categorical_calculation(df).astype(str),
+                           expect,
+                           check_column_type=False)
+        assert_frame_equal(categorical_calculation([df["Col1"],
+                                                    df["Col2"]]).astype(str),
+                           expect,
+                           check_column_type=False)
+
+    def test_numerical_calculation(self):
+        """Test numerical caluclations, particularly for df input"""
+        df = pd.read_csv(os.path.join(test_path,
+                                      "test1.csv"))[["Col1", "Col2"]]
+        expect = pd.DataFrame(
+            data=[["mean Col1 (std)", 5.5,
+                   np.std(df["Col1"])], ["mean Col2 (std)", 1.0, 0.0]],
+            columns=_columns[:3])
+        assert_frame_equal(numerical_calculation(df, np.mean, np.std), expect)
+
 
 class TestTableOneString(unittest.TestCase):
+    # pylint: disable=no-self-use
     """String outputs from analysis functions"""
     def test_mean_and_sd(self):
         """Test the mean and standard devation"""
@@ -383,8 +421,149 @@ class TestTableOneString(unittest.TestCase):
         assert_frame_equal(
             table.counts("Col1", as_str=True).fillna(""), expect.loc[:10])
 
+    def test_counts_comparison(self):
+        """Test chi-square test for counts"""
+        df = pd.read_csv(os.path.join(test_path, "comparison_input.csv"))
+        expect = pd.read_csv(
+            os.path.join(test_path,
+                         "categorical_analysis_comparison_str.csv")).fillna(
+                             "").astype(str)
+        expect = expect.drop(
+            columns=[col for col in expect.columns if "col2" in col])
+
+        table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                  groupings="Col1",
+                                  comparisons="Col1")
+
+        assert_frame_equal(table.counts(as_str=True).fillna(""),
+                           expect,
+                           check_column_type=False)
+
+    def test_counts_comparison_two(self):
+        """Test chi-square test for counts with multiple groupings"""
+        df = pd.read_csv(os.path.join(test_path, "comparison_input.csv"))
+        expect = pd.read_csv(
+            os.path.join(test_path,
+                         "categorical_analysis_comparison_str.csv")).fillna(
+                             "").astype(str)
+
+        table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                  groupings=["Col1", "Col2"],
+                                  comparisons=["Col1", "Col2"])
+
+        assert_frame_equal(table.counts(as_str=True).fillna(""),
+                           expect,
+                           check_column_type=False)
+
+    def test_mean_and_sd_comparison(self):
+        """Test T-test for mean and SD"""
+        df = pd.read_csv(os.path.join(test_path, "comparison_input.csv"))
+        expect = pd.read_csv(os.path.join(
+            test_path, "numerical_analysis_comparison_str.csv"),
+                             dtype=str).fillna("")
+        expect = expect.drop(
+            columns=[col for col in expect.columns if "col2" in col])
+        expect = expect[expect[_category].str.match(r"Mean col\d \(SD\)")]
+
+        table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                  groupings="Col1",
+                                  comparisons="Col1")
+
+        assert_frame_equal(table.mean_and_sd(as_str=True).fillna(""),
+                           expect,
+                           check_column_type=False)
+
+    def test_mean_and_sd_comparison_two(self):
+        """Test chi-square test for counts with multiple groupings"""
+        df = pd.read_csv(os.path.join(test_path, "comparison_input.csv"))
+        expect = pd.read_csv(os.path.join(
+            test_path, "numerical_analysis_comparison_str.csv"),
+                             dtype=str).fillna("")
+        expect = expect[expect[_category].str.match(r"Mean col\d \(SD\)")]
+
+        table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                  groupings=["Col1", "Col2"],
+                                  comparisons=["Col1", "Col2"])
+
+        assert_frame_equal(table.mean_and_sd(as_str=True).fillna(""),
+                           expect,
+                           check_column_type=False)
+
+    def test_mean_and_ci_comparison(self):
+        """Test T-test for mean and CI"""
+        df = pd.read_csv(os.path.join(test_path, "comparison_input.csv"))
+        expect = pd.read_csv(os.path.join(
+            test_path, "numerical_analysis_comparison_str.csv"),
+                             dtype=str).fillna("")
+        expect = expect.drop(
+            columns=[col for col in expect.columns if "col2" in col])
+        expect = expect[expect[_category].str.match(r"Mean col\d \(95% CI\)")]
+        expect = expect.reset_index(drop=True)
+
+        table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                  groupings="Col1",
+                                  comparisons="Col1")
+
+        assert_frame_equal(table.mean_and_ci(as_str=True).fillna(""),
+                           expect,
+                           check_column_type=False)
+
+    def test_mean_and_ci_comparison_two(self):
+        """Test chi-square test for counts with multiple groupings"""
+        df = pd.read_csv(os.path.join(test_path, "comparison_input.csv"))
+        expect = pd.read_csv(os.path.join(
+            test_path, "numerical_analysis_comparison_str.csv"),
+                             dtype=str).fillna("")
+        expect = expect[expect[_category].str.match(r"Mean col\d \(95% CI\)")]
+        expect = expect.reset_index(drop=True)
+
+        table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                  groupings=["Col1", "Col2"],
+                                  comparisons=["Col1", "Col2"])
+
+        assert_frame_equal(table.mean_and_ci(as_str=True).fillna(""),
+                           expect,
+                           check_column_type=False)
+
+    def test_median_and_iqr_comparison(self):
+        """Test T-test for mean and CI"""
+        df = pd.read_csv(os.path.join(test_path, "comparison_input.csv"))
+        expect = pd.read_csv(os.path.join(
+            test_path, "numerical_analysis_comparison_str.csv"),
+                             dtype=str).fillna("")
+        expect = expect.drop(
+            columns=[col for col in expect.columns if "col2" in col])
+        expect = expect[expect[_category].str.match(r"Median col\d")]
+        expect = expect.reset_index(drop=True)
+
+        table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                  groupings="Col1",
+                                  comparisons="Col1")
+
+        assert_frame_equal(table.median_and_iqr(as_str=True).fillna(""),
+                           expect,
+                           check_column_type=False)
+
+    def test_median_and_iqr_comparison_two(self):
+        """Test chi-square test for counts with multiple groupings"""
+        df = pd.read_csv(os.path.join(test_path, "comparison_input.csv"))
+        expect = pd.read_csv(os.path.join(
+            test_path, "numerical_analysis_comparison_str.csv"),
+                             dtype=str).fillna("")
+        expect = expect[expect[_category].str.match(r"Median col\d")]
+        expect = expect.reset_index(drop=True)
+
+        table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                  groupings=["Col1", "Col2"],
+                                  comparisons=["Col1", "Col2"])
+
+        assert_frame_equal(table.median_and_iqr(as_str=True).fillna(""),
+                           expect,
+                           check_column_type=False)
+
 
 class TestTableOneNoString(unittest.TestCase):
+    # pylint: disable=no-self-use
     """Dataframe outputs from analyses"""
     def test_mean_and_sd(self):
         """Test the mean and standard devation"""
@@ -628,6 +807,160 @@ class TestTableOneNoString(unittest.TestCase):
 
         table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"])
         assert_frame_equal(table.analyze(), expect)
+
+    def test_counts_comparison(self):
+        """Test chi-square test for counts"""
+        df = pd.read_csv(os.path.join(test_path, "comparison_input.csv"))
+        expect = pd.read_csv(
+            os.path.join(test_path,
+                         "categorical_analysis_comparison.csv")).fillna("")
+        expect = expect.drop(
+            columns=[col for col in expect.columns if "col2" in col])
+
+        table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                  groupings="Col1",
+                                  comparisons="Col1")
+
+        assert_frame_equal(table.counts().fillna(""),
+                           expect,
+                           check_column_type=False)
+
+    def test_counts_comparison_two(self):
+        """Test chi-square test for counts with multiple groupings"""
+        df = pd.read_csv(os.path.join(test_path, "comparison_input.csv"))
+        expect = pd.read_csv(
+            os.path.join(test_path,
+                         "categorical_analysis_comparison.csv")).fillna("")
+
+        table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                  groupings=["Col1", "Col2"],
+                                  comparisons=["Col1", "Col2"])
+
+        assert_frame_equal(table.counts().fillna(""),
+                           expect,
+                           check_column_type=False)
+
+    def test_mean_and_sd_comparison(self):
+        """Test T-test for mean and SD"""
+        df = pd.read_csv(os.path.join(test_path, "comparison_input.csv"))
+        expect = pd.read_csv(
+            os.path.join(test_path,
+                         "numerical_analysis_comparison.csv")).fillna("")
+        expect = expect.drop(
+            columns=[col for col in expect.columns if "col2" in col])
+        expect = expect[expect[_category].str.match(r"Mean col\d \(SD\)")]
+        for col in expect.columns:
+            if "value" in col or "paren" in col:
+                expect[col] = expect[col].astype(float)
+
+        table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                  groupings="Col1",
+                                  comparisons="Col1")
+
+        assert_frame_equal(table.mean_and_sd().fillna(""),
+                           expect,
+                           check_column_type=False)
+
+    def test_mean_and_sd_comparison_two(self):
+        """Test chi-square test for mean and SD with multiple groupings"""
+        df = pd.read_csv(os.path.join(test_path, "comparison_input.csv"))
+        expect = pd.read_csv(
+            os.path.join(test_path,
+                         "numerical_analysis_comparison.csv")).fillna("")
+        expect = expect[expect[_category].str.match(r"Mean col\d \(SD\)")]
+        for col in expect.columns:
+            if "value" in col or "paren" in col:
+                expect[col] = expect[col].astype(float)
+
+        table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                  groupings=["Col1", "Col2"],
+                                  comparisons=["Col1", "Col2"])
+
+        assert_frame_equal(table.mean_and_sd().fillna(""),
+                           expect,
+                           check_column_type=False)
+
+    def test_mean_and_ci_comparison(self):
+        """Test T-test for mean and CI"""
+        df = pd.read_csv(os.path.join(test_path, "comparison_input.csv"))
+        expect = pd.read_csv(
+            os.path.join(test_path,
+                         "numerical_analysis_comparison.csv")).fillna("")
+        expect = expect.drop(
+            columns=[col for col in expect.columns if "col2" in col])
+        expect = expect[expect[_category].str.match(r"Mean col\d \(95% CI\)")]
+        expect = expect.reset_index(drop=True)
+
+        table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                  groupings="Col1",
+                                  comparisons="Col1")
+
+        to_explode = list(c for c in expect.columns if re.match("paren", c))
+        assert_frame_equal(
+            table.mean_and_ci().fillna("").explode(to_explode).reset_index(
+                drop=True),
+            expect,
+            check_column_type=False,
+            check_dtype=False)
+
+    def test_mean_and_ci_comparison_two(self):
+        """Test chi-square test for mean and 95% CI with multiple groupings"""
+        df = pd.read_csv(os.path.join(test_path, "comparison_input.csv"))
+        expect = pd.read_csv(
+            os.path.join(test_path,
+                         "numerical_analysis_comparison.csv")).fillna("")
+        expect = expect[expect[_category].str.match(r"Mean col\d \(95% CI\)")]
+        expect = expect.reset_index(drop=True)
+
+        table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                  groupings=["Col1", "Col2"],
+                                  comparisons=["Col1", "Col2"])
+
+        to_explode = list(c for c in expect.columns if re.match("paren", c))
+        assert_frame_equal(
+            table.mean_and_ci().fillna("").explode(to_explode).reset_index(
+                drop=True),
+            expect.explode(to_explode),
+            check_column_type=False,
+            check_dtype=False)
+
+    def test_median_and_iqr_comparison(self):
+        """Test median test for median and IQR"""
+        df = pd.read_csv(os.path.join(test_path, "comparison_input.csv"))
+        expect = pd.read_csv(
+            os.path.join(test_path,
+                         "numerical_analysis_comparison.csv")).fillna("")
+        expect = expect.drop(
+            columns=[col for col in expect.columns if "col2" in col])
+        expect = expect[expect[_category].str.match(r"Median col\d")]
+        expect = expect.reset_index(drop=True)
+
+        table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                  groupings="Col1",
+                                  comparisons="Col1")
+
+        assert_frame_equal(table.median_and_iqr().fillna(""),
+                           expect,
+                           check_column_type=False,
+                           check_dtype=False)
+
+    def test_median_and_iqr_comparison_two(self):
+        """Test chi-square test for median and IQR with multiple groupings"""
+        df = pd.read_csv(os.path.join(test_path, "comparison_input.csv"))
+        expect = pd.read_csv(
+            os.path.join(test_path,
+                         "numerical_analysis_comparison.csv")).fillna("")
+        expect = expect[expect[_category].str.match(r"Median col\d")]
+        expect = expect.reset_index(drop=True)
+
+        table = tableone.TableOne(df, ["Col1", "Col2"], ["Col1", "Col2"],
+                                  groupings=["Col1", "Col2"],
+                                  comparisons=["Col1", "Col2"])
+
+        assert_frame_equal(table.median_and_iqr().fillna(""),
+                           expect,
+                           check_column_type=False,
+                           check_dtype=False)
 
 
 if __name__ == "__main__":

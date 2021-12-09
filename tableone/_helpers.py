@@ -73,7 +73,12 @@ def prettify(df: pd.DataFrame,
     :rtype: pd.DataFrame
     """
     out = df.set_index(df.columns[0])
-    if not isinstance(name, str) and len(name) != len(out.columns) / 2:
+    val_paren_cols = [
+        column for column in out.columns
+        if "value" in column or "paren" in column
+    ]
+    p_cols = [column for column in out.columns if "p (" in column]
+    if not isinstance(name, str) and len(name) != len(val_paren_cols) / 2:
         raise ValueError("name must be half in length as the number of "
                          f"columns. Instead, got {len(name)} names "
                          f"and {len(out.columns)} columns.")
@@ -109,8 +114,10 @@ def prettify(df: pd.DataFrame,
                 printed[n] = f"{float(val):.0f} ({paren:.2%})"
         return printed
 
-    out[name] = out.apply(print_proper, axis=1)
-    out = out.reset_index()[[_category] + name]
+    out[name] = out[val_paren_cols].apply(print_proper, axis=1)
+    for p_col in p_cols:
+        out[p_col] = out[p_col].apply(lambda x: f"{x:.3g}").replace("nan", "")
+    out = out.reset_index()[[_category] + name + p_cols]
     return out
 
 
@@ -240,20 +247,26 @@ def categorical_calculation(col: Union[pd.Series, List[pd.Series],
     return out
 
 
-def chi_square(data: np.ndarray) -> tuple:
+def chi_square(column: pd.Series, condition: pd.Series) -> float:
+    condition = condition.astype(bool)
+    trues = column[condition].value_counts().to_frame()
+    falses = column[~condition].value_counts().to_frame()
+    data = trues.join(falses, how="outer", rsuffix="_false").fillna(0).values
     expect = (data.sum(axis=0) * data.sum(axis=1).reshape(-1, 1)) / data.sum()
     chi = scipy.stats.chisquare(data, expect, axis=None)
 
-    return chi
+    return chi[1]
 
 
-def ttest(column: pd.Series, condition: pd.Series) -> Tuple[float, float]:
+def ttest(column: pd.Series, condition: pd.Series) -> float:
+    condition = condition.astype(bool)
     trues = column[condition].values
     falses = column[~condition].values
-    return scipy.stats.ttest_ind(trues, falses)
+    return scipy.stats.ttest_ind(trues, falses)[1]
 
 
 def median_test(column: pd.Series, condition: pd.Series):
+    condition = condition.astype(bool)
     trues = column[condition].values
     falses = column[~condition].values
-    return scipy.stats.median_test(trues, falses)
+    return scipy.stats.median_test(trues, falses)[1]

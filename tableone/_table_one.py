@@ -1,13 +1,14 @@
 """For the Table One class"""
 import warnings
-from typing import Callable, Dict, Tuple, Union
+from typing import Callable, Dict, List, Tuple, Union
 
 import numpy as np
 import pandas as pd
 
-from ._helpers import _category, _paren, _value, categorical_calculation
+from ._helpers import (_category, _paren, _value, categorical_calculation,
+                       chi_square)
 from ._helpers import ci as ci_
-from ._helpers import iqr, numerical_calculation, prettify
+from ._helpers import iqr, median_test, numerical_calculation, prettify, ttest
 
 
 class TableOne:
@@ -20,13 +21,16 @@ class TableOne:
     :param numerical: The numerical columns to analyze.
     :type numerical: list
     :param groupings: The columns to group by.
-    :type groupings: list
+    :type groupings: list or str
+    :param compare: The groupings to perform comparison tests on.
+    :type compare: list or str
     """
     def __init__(self,
                  data: pd.DataFrame,
                  categorical: list,
                  numerical: list,
-                 groupings: Union[list, str] = None):
+                 groupings: Union[List[str], str] = None,
+                 comparisons: Union[List[str], str] = None):
         self.data = data.copy()
 
         # Lowercase all column names
@@ -62,6 +66,16 @@ class TableOne:
             raise ValueError("Groupings must be columns in data."
                              f" Missing {missing_groupings}")
 
+        if isinstance(comparisons, str):
+            comparisons = [comparisons]
+        self.comparisons = [] if comparisons is None else list(
+            map(lower, comparisons))
+        if missing_compare := (set(self.comparisons) - set(self.groupings)):
+            raise ValueError("Comparison groupings must be groupings."
+                             f" Missing {missing_compare}")
+        if any(self.data[c].nunique() > 2 for c in self.comparisons):
+            raise ValueError("Comparison groups must have at most 2 values.")
+
     def __repr__(self):
         return f"TableOne({self.n} patients)"
 
@@ -85,6 +99,7 @@ class TableOne:
               as_str: bool = False,
               name: str = "",
               split: bool = True,
+              test: Callable[[pd.Series, pd.Series], float] = None,
               **params) -> pd.DataFrame:
         """A generic function to calculate center and spread
 
@@ -123,6 +138,7 @@ class TableOne:
                            as_str=False,
                            name=name,
                            split=split,
+                           test=test,
                            **params) for c in col_name
             ]).reset_index(drop=True)
             if as_str:
@@ -148,6 +164,13 @@ class TableOne:
                             ] + [f"{c} ({idx})" for c in [_value, _paren]]
             out = out.merge(calc, how="outer", suffixes=["", " " + idx])
 
+        # Comparison tests
+        if self.comparisons and test is not None:
+            for comp in self.comparisons:
+                row_idx = out.index[0]
+                out.loc[row_idx, f"p ({comp})"] = test(data[col_name],
+                                                       data[comp])
+
         if as_str:
             out = prettify(out, name=names)
 
@@ -160,7 +183,8 @@ class TableOne:
                   text: str = None,
                   as_str: bool = False,
                   name: str = "",
-                  split: bool = True) -> pd.DataFrame:
+                  split: bool = True,
+                  test: Callable = None) -> pd.DataFrame:
         """A generic function to calculate center and spread
 
         :param col_name: The column or columns to analyze.
@@ -191,7 +215,8 @@ class TableOne:
                          val_func=val_func,
                          spread_func=spread_func,
                          text=text,
-                         split=split)
+                         split=split,
+                         test=test)
 
         return out
 
@@ -217,8 +242,8 @@ class TableOne:
     def drop_invalid(self) -> None:
         """Drop the invalid values in the numeric columns"""
         invalid = self.id_invalid()
-        for column in invalid:
-            self.data.loc[invalid[column], column] = np.nan
+        for column, idxes in invalid.items():
+            self.data.loc[idxes, column] = np.nan
             self.data[column] = self.data[column].astype(float)
 
     def analyze_numeric(self, as_str: bool = False) -> pd.DataFrame:
@@ -252,7 +277,7 @@ class TableOne:
 
         sd.__name__ = "SD"
 
-        return self._num_calc(col, mean, sd, as_str=as_str)
+        return self._num_calc(col, mean, sd, as_str=as_str, test=ttest)
 
     def median_and_iqr(self,
                        col: Union[str, list] = None,
@@ -277,7 +302,11 @@ class TableOne:
 
         _iqr.__name__ = "IQR"
 
-        return self._num_calc(col, median, _iqr, as_str=as_str)
+        return self._num_calc(col,
+                              median,
+                              _iqr,
+                              as_str=as_str,
+                              test=median_test)
 
     def mean_and_ci(self,
                     col: Union[str, list] = None,
@@ -297,7 +326,7 @@ class TableOne:
 
         _ci.__name__ = "95% CI"
 
-        return self._num_calc(col, _mean, _ci, as_str=as_str)
+        return self._num_calc(col, _mean, _ci, as_str=as_str, test=ttest)
 
     def analyze_categorical(self, as_str: bool = False) -> pd.DataFrame:
         out = self.counts(self.cat, as_str=as_str).reset_index(drop=True)
@@ -316,7 +345,8 @@ class TableOne:
                          func=categorical_calculation,
                          as_str=as_str,
                          name=name,
-                         split=split)
+                         split=split,
+                         test=chi_square)
 
         return out
 
