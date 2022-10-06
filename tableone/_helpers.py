@@ -6,6 +6,7 @@ from typing import Callable, List, Tuple, Union
 import numpy as np
 import pandas as pd
 import scipy.stats
+from scipy.special import factorial
 
 _category, _value, _paren, = _columns = ["category", "value", "paren"]
 
@@ -298,6 +299,18 @@ def chi_square(column: pd.Series, condition: pd.Series) -> float:
     chi = scipy.stats.chisquare(data, expect, axis=None)
 
     return chi[1]
+
+
+def fisher_exact(column: pd.Series, condition: pd.Series) -> float:
+    condition = condition.astype(bool)
+    trues = column[condition].value_counts().to_frame()
+    falses = column[~condition].value_counts().to_frame()
+    data = trues.join(falses, how="outer", rsuffix="_false").fillna(0).values
+    n = data.sum()
+    numerator = (factorial(data.sum(axis=0)).prod()*
+                 factorial(data.sum(axis=1)).prod())
+    denominator = factorial(data).prod()*factorial(n)
+    return numerator/denominator
 
 
 def ttest(column: pd.Series, condition: pd.Series) -> float:
